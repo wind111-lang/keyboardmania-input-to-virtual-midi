@@ -4,6 +4,8 @@ Linux joystick device input reader for Keyboardmania-style controllers.
 
 ## Setup
 
+Requires PHP 8.5 or later.
+
 ```sh
 composer install
 ```
