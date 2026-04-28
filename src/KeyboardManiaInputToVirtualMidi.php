@@ -4,15 +4,14 @@ declare(strict_types=1);
 
 namespace KeyboardManiaInputToVirtualMidi;
 
-use RuntimeException;
-
 class KeyboardManiaInputToVirtualMidi
 {
     private const int JS_EVENT_BUTTON = 0x01;
     private const int JS_EVENT_AXIS = 0x02;
     private const int JS_EVENT_INIT = 0x80;
+    private const int DEVICE_RETRY_SECONDS = 1;
 
-    private readonly mixed $deviceHandle;
+    private readonly string $devicePath;
 
     private readonly array $keyMap;
 
@@ -26,29 +25,64 @@ class KeyboardManiaInputToVirtualMidi
 
     public function __construct(string $devicePath, array $config)
     {
-        $handle = @fopen($devicePath, 'rb');
-
-        if ($handle === false) {
-            throw new RuntimeException("Failed to open device: {$devicePath}");
-        }
-
-        stream_set_blocking($handle, true);
-
-        $this->deviceHandle = $handle;
+        $this->devicePath = $devicePath;
         $this->keyMap = $this->normalizeStringMap($config['keys'] ?? []);
         $this->axisMap = $this->normalizeStringMap($config['axes'] ?? []);
         $this->buttonMap = $this->normalizeStringMap($config['buttons'] ?? []);
     }
 
-    public function run(): void
+    public function run(): never
     {
-        fwrite(STDERR, "Reading controller input...\n");
         fwrite(STDERR, "Press Ctrl+C to stop.\n\n");
 
-        while (!feof($this->deviceHandle)) {
-            $data = fread($this->deviceHandle, 8);
+        while (true) {
+            $deviceHandle = $this->waitForDevice();
 
-            if ($data === false || strlen($data) !== 8) {
+            fwrite(STDERR, "Reading controller input: {$this->devicePath}\n");
+
+            $this->readEvents($deviceHandle);
+
+            if (is_resource($deviceHandle)) {
+                fclose($deviceHandle);
+            }
+
+            $this->pressedNotes = [];
+
+            fwrite(STDERR, "Controller input stopped. Waiting for device to return...\n");
+        }
+    }
+
+    private function waitForDevice(): mixed
+    {
+        $reportedWaiting = false;
+
+        while (true) {
+            $handle = @fopen($this->devicePath, 'rb');
+
+            if ($handle !== false) {
+                stream_set_blocking($handle, true);
+                return $handle;
+            }
+
+            if (!$reportedWaiting) {
+                fwrite(STDERR, "Waiting for controller input device: {$this->devicePath}\n");
+                $reportedWaiting = true;
+            }
+
+            sleep(self::DEVICE_RETRY_SECONDS);
+        }
+    }
+
+    private function readEvents(mixed $deviceHandle): void
+    {
+        while (!feof($deviceHandle)) {
+            $data = fread($deviceHandle, 8);
+
+            if ($data === false || $data === '') {
+                break;
+            }
+
+            if (strlen($data) !== 8) {
                 continue;
             }
 

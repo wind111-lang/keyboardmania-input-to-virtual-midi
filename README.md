@@ -1,35 +1,19 @@
 # keyboardmania-input-to-virtual-midi
 
-Linux joystick device input reader for Keyboardmania-style controllers.
+Keyboardmania 専用コントローラーの Linux joystick device input を読み取るための PHP ライブラリです。
+
+## Target Device
+
+このプロジェクトの利用には Keyboardmania 専用コントローラーが必要です。
+
+Linux の joystick device として認識され、`config/keymap.json` の割り当てに合わせられる USB ゲームコントローラーであれば動作する可能性はあります。ただし、このリポジトリは Keyboardmania 専用コントローラーでの利用を目的としているため、それ以外のコントローラーでの利用は目的外です。
+
+指定した joystick device がまだ存在しない場合、入力読み取りはデバイスが認識されるまで待機します。
 
 ## Setup
 
-Requires PHP 8.5 or later.
+PHP 8.5 以上が必要です。
 
 ```sh
 composer install
 ```
-
-## Usage
-
-```php
-<?php
-
-declare(strict_types=1);
-
-require __DIR__ . '/vendor/autoload.php';
-
-use KeyboardManiaInputToVirtualMidi\KeyboardManiaInputToVirtualMidi;
-
-$config = json_decode(
-    file_get_contents(__DIR__ . '/config/keymap.json'),
-    true,
-    512,
-    JSON_THROW_ON_ERROR,
-);
-
-$app = new KeyboardManiaInputToVirtualMidi('/dev/input/js0', $config);
-$app->run();
-```
-
-The program emits one JSON object per input event.
