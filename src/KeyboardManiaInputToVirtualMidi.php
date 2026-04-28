@@ -8,30 +8,22 @@ use RuntimeException;
 
 class KeyboardManiaInputToVirtualMidi
 {
-    private const JS_EVENT_BUTTON = 0x01;
-    private const JS_EVENT_AXIS = 0x02;
-    private const JS_EVENT_INIT = 0x80;
+    private const int JS_EVENT_BUTTON = 0x01;
+    private const int JS_EVENT_AXIS = 0x02;
+    private const int JS_EVENT_INIT = 0x80;
 
-    /** @var resource */
-    private $deviceHandle;
+    private readonly mixed $deviceHandle;
 
-    /** @var array<string, string> */
-    private array $keyMap;
+    private readonly array $keyMap;
 
-    /** @var array<string, string> */
-    private array $axisMap;
+    private readonly array $axisMap;
 
-    /** @var array<string, string> */
-    private array $buttonMap;
+    private readonly array $buttonMap;
 
-    /** @var array<int, string> */
     private array $pressedNotes = [];
 
     private int $volume = 100;
 
-    /**
-     * @param array<string, mixed> $config
-     */
     public function __construct(string $devicePath, array $config)
     {
         $handle = @fopen($devicePath, 'rb');
@@ -252,11 +244,7 @@ class KeyboardManiaInputToVirtualMidi
         return (int) round($normalized * 127);
     }
 
-    /**
-     * @param mixed $map
-     * @return array<string, string>
-     */
-    private function normalizeStringMap($map): array
+    private function normalizeStringMap(mixed $map): array
     {
         if (!is_array($map)) {
             return [];
@@ -275,24 +263,17 @@ class KeyboardManiaInputToVirtualMidi
         return $result;
     }
 
-    /**
-     * @param array<string, mixed> $payload
-     */
     private function emit(array $payload): void
     {
-        echo json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n";
+        echo json_encode($payload, flags: JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
     }
 
     private function inputTypeName(int $type): string
     {
-        if ($type === self::JS_EVENT_BUTTON) {
-            return 'button';
-        }
-
-        if ($type === self::JS_EVENT_AXIS) {
-            return 'axis';
-        }
-
-        return 'unknown';
+        return match ($type) {
+            self::JS_EVENT_BUTTON => 'button',
+            self::JS_EVENT_AXIS => 'axis',
+            default => 'unknown',
+        };
     }
 }
