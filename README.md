@@ -10,10 +10,24 @@ composer install
 
 ## Usage
 
-```sh
-php bin/keyboardmania-input-to-virtual-midi /dev/input/js0 config/keymap.json
-```
+```php
+<?php
 
-If arguments are omitted, the script uses `/dev/input/js0` and `config/keymap.json`.
+declare(strict_types=1);
+
+require __DIR__ . '/vendor/autoload.php';
+
+use KeyboardManiaInputToVirtualMidi\KeyboardManiaInputToVirtualMidi;
+
+$config = json_decode(
+    file_get_contents(__DIR__ . '/config/keymap.json'),
+    true,
+    512,
+    JSON_THROW_ON_ERROR,
+);
+
+$app = new KeyboardManiaInputToVirtualMidi('/dev/input/js0', $config);
+$app->run();
+```
 
 The program emits one JSON object per input event.

@@ -10,8 +10,5 @@
     "psr-4": {
       "KeyboardManiaInputToVirtualMidi\\": "src/"
     }
-  },
-  "bin": [
-    "bin/keyboardmania-input-to-virtual-midi"
-  ]
+  }
 }
