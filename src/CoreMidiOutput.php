@@ -88,19 +88,19 @@ final class CoreMidiOutput implements ControllerEventOutput
     public function panic(): void
     {
         foreach (array_keys($this->activeNotes) as $noteNumber) {
-            $this->sendMessage([
+            $this->sendMessage(
                 self::MIDI_NOTE_OFF | $this->midiChannel,
                 $noteNumber,
                 0,
-            ]);
+            );
         }
 
         $this->activeNotes = [];
-        $this->sendMessage([
+        $this->sendMessage(
             self::MIDI_CONTROL_CHANGE | $this->midiChannel,
             self::MIDI_ALL_NOTES_OFF,
             0,
-        ]);
+        );
     }
 
     private function createFfi(): FFI
@@ -130,7 +130,9 @@ typedef struct MIDIPacketList {
 CFStringRef CFStringCreateWithCString(const void *alloc, const char *cStr, unsigned int encoding);
 OSStatus MIDIClientCreate(CFStringRef name, void *notifyProc, void *notifyRefCon, MIDIClientRef *outClient);
 OSStatus MIDISourceCreate(MIDIClientRef client, CFStringRef name, MIDIEndpointRef *outSrc);
-void MIDIReceived(MIDIEndpointRef src, const MIDIPacketList *pktlist);
+MIDIPacket *MIDIPacketListInit(MIDIPacketList *pktlist);
+MIDIPacket *MIDIPacketListAdd(MIDIPacketList *pktlist, unsigned long listSize, MIDIPacket *curPacket, MIDITimeStamp time, unsigned long nData, const Byte *data);
+OSStatus MIDIReceived(MIDIEndpointRef src, const MIDIPacketList *pktlist);
 CDEF;
 
         try {
@@ -177,45 +179,54 @@ CDEF;
     private function sendNoteOn(int $noteNumber, int $velocity): void
     {
         $this->activeNotes[$noteNumber] = true;
-        $this->sendMessage([
+        $this->sendMessage(
             self::MIDI_NOTE_ON | $this->midiChannel,
             $noteNumber,
             $velocity,
-        ]);
+        );
     }
 
     private function sendNoteOff(int $noteNumber): void
     {
         unset($this->activeNotes[$noteNumber]);
-        $this->sendMessage([
+        $this->sendMessage(
             self::MIDI_NOTE_OFF | $this->midiChannel,
             $noteNumber,
             0,
-        ]);
+        );
     }
 
-    /**
-     * @param list<int> $bytes
-     */
-    private function sendMessage(array $bytes): void
+    private function sendMessage(int $status, int $data1, int $data2): void
     {
         if ($this->source === 0) {
             return;
         }
 
         $packetList = $this->ffi->new('MIDIPacketList');
-        $packetList->numPackets = 1;
-        $packetList->packet[0]->timeStamp = 0;
-        $packetList->packet[0]->length = count($bytes);
+        $packet = $this->ffi->MIDIPacketListInit(FFI::addr($packetList));
+        $data = $this->ffi->new('Byte[3]');
+        $data[0] = $status & 0xFF;
+        $data[1] = $this->clampSevenBit($data1);
+        $data[2] = $this->clampSevenBit($data2);
 
-        foreach ($bytes as $index => $byte) {
-            $packetList->packet[0]->data[$index] = $this->clampSevenBit($byte);
+        $packet = $this->ffi->MIDIPacketListAdd(
+            FFI::addr($packetList),
+            FFI::sizeof($packetList),
+            $packet,
+            0,
+            3,
+            $data,
+        );
+
+        if ($packet === null) {
+            throw new RuntimeException('Failed to build MIDI packet.');
         }
 
-        // Status bytes are 8-bit values, so restore the first byte after seven-bit clamping.
-        $packetList->packet[0]->data[0] = $bytes[0] & 0xFF;
+        $status = $this->ffi->MIDIReceived($this->source, FFI::addr($packetList));
 
-        $this->ffi->MIDIReceived($this->source, FFI::addr($packetList));
+        if ($status !== 0) {
+            throw new RuntimeException(sprintf('Failed to publish MIDI event: 0x%08x', $status));
+        }
     }
 
     private function noteNameToMidiNumber(string $noteName): ?int
