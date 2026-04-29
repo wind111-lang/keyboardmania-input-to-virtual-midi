@@ -31,6 +31,10 @@ final readonly class ConsoleApplication
                 return 0;
             }
 
+            if ($options['test_note'] !== null) {
+                $this->runMidiTest($options);
+            }
+
             $config = $this->loadConfig($options['config']);
 
             $this->runInput($options, $config);
@@ -50,6 +54,7 @@ final readonly class ConsoleApplication
      *     output: string,
      *     midi_source: string,
      *     midi_channel: int,
+     *     test_note: string|null,
      *     help: bool
      * }
      */
@@ -62,6 +67,7 @@ final readonly class ConsoleApplication
             'output' => 'midi',
             'midi_source' => self::DEFAULT_MIDI_SOURCE,
             'midi_channel' => 1,
+            'test_note' => null,
             'help' => false,
         ];
 
@@ -156,6 +162,22 @@ final readonly class ConsoleApplication
                 continue;
             }
 
+            if ($argument === '--test-note') {
+                $options['test_note'] = $this->midiNoteName(
+                    $this->readOptionValue($argv, $index, $argument),
+                    $argument,
+                );
+                continue;
+            }
+
+            if (str_starts_with($argument, '--test-note=')) {
+                $options['test_note'] = $this->midiNoteName(
+                    substr($argument, strlen('--test-note=')),
+                    '--test-note',
+                );
+                continue;
+            }
+
             throw new InvalidArgumentException("Unknown argument: {$argument}");
         }
 
@@ -182,6 +204,45 @@ final readonly class ConsoleApplication
         );
 
         $runner->run();
+    }
+
+    /**
+     * @param array{midi_source: string, midi_channel: int, test_note: string} $options
+     */
+    private function runMidiTest(array $options): never
+    {
+        $output = new CoreMidiOutput(
+            $options['midi_source'],
+            $options['midi_channel'],
+        );
+        $note = $options['test_note'];
+
+        fwrite(
+            STDERR,
+            sprintf(
+                "Sending test note %s on MIDI channel %d. Press Ctrl+C to stop.\n",
+                $note,
+                $options['midi_channel'],
+            ),
+        );
+
+        while (true) {
+            $output->emit([
+                'type' => 'note_down',
+                'note' => $note,
+                'volume' => 100,
+                'time_ms' => $this->timeMilliseconds(),
+            ]);
+            usleep(300_000);
+
+            $output->emit([
+                'type' => 'note_up',
+                'note' => $note,
+                'volume' => 100,
+                'time_ms' => $this->timeMilliseconds(),
+            ]);
+            usleep(700_000);
+        }
     }
 
     /**
@@ -263,6 +324,42 @@ final readonly class ConsoleApplication
         return $value;
     }
 
+    private function midiNoteName(string $value, string $option): string
+    {
+        $value = $this->nonEmptyOptionValue($value, $option);
+
+        if (!preg_match('/^([A-Ga-g])([#b]?)(-?\d+)$/', $value, $matches)) {
+            throw new InvalidArgumentException(
+                "Invalid value for {$option}: {$value}. Expected a note like C4 or F#3.",
+            );
+        }
+
+        $base = match (strtoupper($matches[1])) {
+            'C' => 0,
+            'D' => 2,
+            'E' => 4,
+            'F' => 5,
+            'G' => 7,
+            'A' => 9,
+            'B' => 11,
+        };
+        $accidental = match ($matches[2]) {
+            '#' => 1,
+            'b' => -1,
+            default => 0,
+        };
+        $octave = (int) $matches[3];
+        $noteNumber = (($octave + 1) * 12) + $base + $accidental;
+
+        if ($noteNumber < 0 || $noteNumber > 127) {
+            throw new InvalidArgumentException(
+                "Invalid value for {$option}: {$value}. MIDI note is outside 0-127.",
+            );
+        }
+
+        return strtoupper($matches[1]) . $matches[2] . $matches[3];
+    }
+
     private function integerOptionValue(string $value, string $option): int
     {
         $value = $this->nonEmptyOptionValue($value, $option);
@@ -325,6 +422,7 @@ final readonly class ConsoleApplication
         return <<<USAGE
 Usage:
   php run.php [--output json|midi|both] [--config PATH]
+  php run.php --test-note NOTE
 
 Options:
   -o, --output MODE   Output: json, midi, or both (default: midi)
@@ -333,15 +431,22 @@ Options:
       --product-id ID HID USB product ID (default: 0x0010)
       --midi-source N CoreMIDI source name (default: KeyboardMania Virtual MIDI)
       --midi-channel N MIDI channel, 1-16 (default: 1)
+      --test-note N   Send a repeating CoreMIDI test note without reading HID input
   -h, --help          Show this help
 
 Examples:
   php run.php
   php run.php --output midi
   php run.php --output both
+  php run.php --test-note C4
 
 The command waits if the selected HID device does not exist yet.
 
 USAGE;
+    }
+
+    private function timeMilliseconds(): int
+    {
+        return (int) round(hrtime(true) / 1_000_000);
     }
 }

@@ -42,6 +42,12 @@ JSON event も同時に確認したい場合:
 php run.php --output both
 ```
 
+HID input を使わず、CoreMIDI source からテストノートだけを送る場合:
+
+```sh
+php run.php --test-note C4
+```
+
 別の USB vendor/product ID を指定する場合:
 
 ```sh
@@ -63,3 +69,19 @@ php run.php --config config/keymap.json
 起動すると `Press Ctrl+C to stop.` が表示されます。指定した HID device がまだ存在しない場合は、デバイスが認識されるまで待機します。
 
 音楽アプリ側では MIDI 入力として `KeyboardMania Virtual MIDI` を選択してください。
+
+## Troubleshooting
+
+VCV Rack Free に `KeyboardMania Virtual MIDI` が見えているのに音が鳴らない場合は、まず次のコマンドで CoreMIDI だけを確認してください。
+
+```sh
+php run.php --test-note C4
+```
+
+VCV Rack 側では `MIDI-CV` module の Driver を `Core MIDI`、Device を `KeyboardMania Virtual MIDI`、Channel を `1` または `All` にします。`V/OCT` を oscillator に、`GATE` を envelope や VCA に接続した状態でテストノートが鳴れば、CoreMIDI と VCV Rack の設定は通っています。
+
+テストノートは鳴るのに Keyboardmania controller で鳴らない場合は、次のコマンドで HID input が `note_down` / `note_up` に変換されているか確認してください。
+
+```sh
+php run.php --output both
+```
