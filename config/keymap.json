@@ -30,9 +30,7 @@
     "1": "volume"
   },
   "buttons": {
-    "24": "select",
-    "25": "start",
-    "26": "wheel_up",
-    "27": "wheel_down"
+    "24": "start",
+    "25": "select"
   }
 }
