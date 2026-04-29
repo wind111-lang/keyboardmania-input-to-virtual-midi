@@ -10,7 +10,9 @@ use RuntimeException;
 
 final readonly class ConsoleApplication
 {
-    private const string DEFAULT_DEVICE_PATH = '/dev/input/js0';
+    private const int DEFAULT_VENDOR_ID = 0x0507;
+    private const int DEFAULT_PRODUCT_ID = 0x0010;
+    private const string DEFAULT_MIDI_SOURCE = 'KeyboardMania Virtual MIDI';
 
     public function __construct(private string $projectRoot)
     {
@@ -31,12 +33,7 @@ final readonly class ConsoleApplication
 
             $config = $this->loadConfig($options['config']);
 
-            $runner = new KeyboardManiaInputToVirtualMidi(
-                $options['device'],
-                $config,
-            );
-
-            $runner->run();
+            $this->runInput($options, $config);
         } catch (JsonException $exception) {
             return $this->fail("Failed to parse keymap JSON: {$exception->getMessage()}");
         } catch (InvalidArgumentException | RuntimeException $exception) {
@@ -46,13 +43,25 @@ final readonly class ConsoleApplication
 
     /**
      * @param list<string> $argv
-     * @return array{device: string, config: string, help: bool}
+     * @return array{
+     *     config: string,
+     *     vendor_id: int,
+     *     product_id: int,
+     *     output: string,
+     *     midi_source: string,
+     *     midi_channel: int,
+     *     help: bool
+     * }
      */
     private function parseArguments(array $argv): array
     {
         $options = [
-            'device' => self::DEFAULT_DEVICE_PATH,
             'config' => $this->projectRoot . '/config/keymap.json',
+            'vendor_id' => self::DEFAULT_VENDOR_ID,
+            'product_id' => self::DEFAULT_PRODUCT_ID,
+            'output' => 'midi',
+            'midi_source' => self::DEFAULT_MIDI_SOURCE,
+            'midi_channel' => 1,
             'help' => false,
         ];
 
@@ -64,15 +73,16 @@ final readonly class ConsoleApplication
                 continue;
             }
 
-            if ($argument === '-d' || $argument === '--device') {
-                $options['device'] = $this->readOptionValue($argv, $index, $argument);
+            if ($argument === '-o' || $argument === '--output') {
+                $options['output'] = $this->outputMode(
+                    $this->readOptionValue($argv, $index, $argument),
+                );
                 continue;
             }
 
-            if (str_starts_with($argument, '--device=')) {
-                $options['device'] = $this->nonEmptyOptionValue(
-                    substr($argument, strlen('--device=')),
-                    '--device',
+            if (str_starts_with($argument, '--output=')) {
+                $options['output'] = $this->outputMode(
+                    substr($argument, strlen('--output=')),
                 );
                 continue;
             }
@@ -90,10 +100,111 @@ final readonly class ConsoleApplication
                 continue;
             }
 
+            if ($argument === '--vendor-id') {
+                $options['vendor_id'] = $this->readIntegerOptionValue($argv, $index, $argument);
+                continue;
+            }
+
+            if (str_starts_with($argument, '--vendor-id=')) {
+                $options['vendor_id'] = $this->integerOptionValue(
+                    substr($argument, strlen('--vendor-id=')),
+                    '--vendor-id',
+                );
+                continue;
+            }
+
+            if ($argument === '--product-id') {
+                $options['product_id'] = $this->readIntegerOptionValue($argv, $index, $argument);
+                continue;
+            }
+
+            if (str_starts_with($argument, '--product-id=')) {
+                $options['product_id'] = $this->integerOptionValue(
+                    substr($argument, strlen('--product-id=')),
+                    '--product-id',
+                );
+                continue;
+            }
+
+            if ($argument === '--midi-source') {
+                $options['midi_source'] = $this->readOptionValue($argv, $index, $argument);
+                continue;
+            }
+
+            if (str_starts_with($argument, '--midi-source=')) {
+                $options['midi_source'] = $this->nonEmptyOptionValue(
+                    substr($argument, strlen('--midi-source=')),
+                    '--midi-source',
+                );
+                continue;
+            }
+
+            if ($argument === '--midi-channel') {
+                $options['midi_channel'] = $this->midiChannel(
+                    $this->readIntegerOptionValue($argv, $index, $argument),
+                );
+                continue;
+            }
+
+            if (str_starts_with($argument, '--midi-channel=')) {
+                $options['midi_channel'] = $this->midiChannel(
+                    $this->integerOptionValue(
+                        substr($argument, strlen('--midi-channel=')),
+                        '--midi-channel',
+                    ),
+                );
+                continue;
+            }
+
             throw new InvalidArgumentException("Unknown argument: {$argument}");
         }
 
         return $options;
+    }
+
+    /**
+     * @param array{
+     *     vendor_id: int,
+     *     product_id: int,
+     *     output: string,
+     *     midi_source: string,
+     *     midi_channel: int
+     * } $options
+     * @param array<mixed> $config
+     */
+    private function runInput(array $options, array $config): never
+    {
+        $runner = new HidInputToVirtualMidi(
+            $options['vendor_id'],
+            $options['product_id'],
+            $config,
+            $this->createOutput($options),
+        );
+
+        $runner->run();
+    }
+
+    /**
+     * @param array{output: string, midi_source: string, midi_channel: int} $options
+     */
+    private function createOutput(array $options): ControllerEventOutput
+    {
+        $output = $options['output'];
+
+        return match ($output) {
+            'json' => new JsonEventOutput(),
+            'midi' => new CoreMidiOutput(
+                $options['midi_source'],
+                $options['midi_channel'],
+            ),
+            'both' => new CompositeEventOutput([
+                new JsonEventOutput(),
+                new CoreMidiOutput(
+                    $options['midi_source'],
+                    $options['midi_channel'],
+                ),
+            ]),
+        };
     }
 
     /**
@@ -110,6 +221,17 @@ final readonly class ConsoleApplication
         return $this->nonEmptyOptionValue($argv[$index], $option);
     }
 
+    /**
+     * @param list<string> $argv
+     */
+    private function readIntegerOptionValue(array $argv, int &$index, string $option): int
+    {
+        return $this->integerOptionValue(
+            $this->readOptionValue($argv, $index, $option),
+            $option,
+        );
+    }
+
     private function nonEmptyOptionValue(string $value, string $option): string
     {
         if ($value === '') {
@@ -117,6 +239,51 @@ final readonly class ConsoleApplication
         }
 
         return $value;
+    }
+
+    private function outputMode(string $value): string
+    {
+        $value = $this->nonEmptyOptionValue($value, '--output');
+
+        if (!in_array($value, ['json', 'midi', 'both'], true)) {
+            throw new InvalidArgumentException(
+                "Invalid output mode: {$value}. Expected json, midi, or both.",
+            );
+        }
+
+        return $value;
+    }
+
+    private function midiChannel(int $value): int
+    {
+        if ($value < 1 || $value > 16) {
+            throw new InvalidArgumentException('MIDI channel must be between 1 and 16.');
+        }
+
+        return $value;
+    }
+
+    private function integerOptionValue(string $value, string $option): int
+    {
+        $value = $this->nonEmptyOptionValue($value, $option);
+
+        if (str_starts_with(strtolower($value), '0x')) {
+            $hex = substr($value, 2);
+
+            if ($hex === '' || !ctype_xdigit($hex)) {
+                throw new InvalidArgumentException("Invalid value for {$option}: {$value}");
+            }
+
+            return (int) hexdec($hex);
+        }
+
+        $parsed = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+
+        if ($parsed === false) {
+            throw new InvalidArgumentException("Invalid value for {$option}: {$value}");
+        }
+
+        return $parsed;
     }
 
     /**
@@ -157,18 +324,23 @@ final readonly class ConsoleApplication
 
         return <<<USAGE
 Usage:
-  php run.php [--device PATH] [--config PATH]
+  php run.php [--output json|midi|both] [--config PATH]
 
 Options:
-  -d, --device PATH   Linux joystick device to read (default: /dev/input/js0)
+  -o, --output MODE   Output: json, midi, or both (default: midi)
   -c, --config PATH   Keymap JSON file (default: {$defaultConfig})
+      --vendor-id ID  HID USB vendor ID (default: 0x0507)
+      --product-id ID HID USB product ID (default: 0x0010)
+      --midi-source N CoreMIDI source name (default: KeyboardMania Virtual MIDI)
+      --midi-channel N MIDI channel, 1-16 (default: 1)
   -h, --help          Show this help
 
 Examples:
   php run.php
-  php run.php --device /dev/input/js1
+  php run.php --output midi
+  php run.php --output both
 
-The command waits if the device does not exist yet.
+The command waits if the selected HID device does not exist yet.
 
 USAGE;
     }

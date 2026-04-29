@@ -1,6 +1,6 @@
 {
   "name": "wind111-lang/keyboardmania-input-to-virtual-midi",
-  "description": "Read Keyboardmania controller input from a Linux joystick device and emit JSON events.",
+  "description": "Read Keyboardmania controller input from HID and publish CoreMIDI events.",
   "type": "project",
   "license": "proprietary",
   "require": {
