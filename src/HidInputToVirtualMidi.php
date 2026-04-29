@@ -15,10 +15,43 @@ final class HidInputToVirtualMidi
     private const int DUMP_SNAPSHOT_MILLISECONDS = 1_000;
     private const int CF_STRING_ENCODING_UTF8 = 0x08000100;
     private const int CF_NUMBER_INT_TYPE = 9;
+    private const int HID_REPORT_TYPE_INPUT = 0;
+    private const int KEYBOARDMANIA_REPORT_BYTES = 9;
     private const int HID_PAGE_GENERIC_DESKTOP = 0x01;
     private const int HID_PAGE_BUTTON = 0x09;
     private const int HID_USAGE_X = 0x30;
     private const int HID_USAGE_Y = 0x31;
+    // 24 keys left-to-right, then select/start/wheel-up/wheel-down in the raw input report.
+    private const array KEYBOARDMANIA_BUTTON_BITS = [
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        40,
+        41,
+        42,
+        43,
+        44,
+        30,
+        38,
+        45,
+        46,
+    ];
 
     private readonly ControllerEventMapper $mapper;
 
@@ -74,6 +107,16 @@ final class HidInputToVirtualMidi
                     ? "Dumping raw HID input with one snapshot per second.\n"
                     : "Dumping raw HID input changes. Add --dump-hid-snapshots to include snapshots.\n";
                 fwrite(STDERR, $message);
+            }
+
+            if ($this->isKeyboardManiaController() && $this->pollKeyboardManiaRawReport($device)) {
+                $this->mapper->reset();
+                fwrite(STDERR, "HID input stopped. Waiting for device to return...\n");
+                continue;
+            }
+
+            if ($this->dumpRawHid) {
+                fwrite(STDERR, "Raw HID report unavailable. Falling back to IOHID elements.\n");
                 $this->dumpElementLayout($elements);
             }
 
@@ -98,6 +141,7 @@ typedef struct __CFDictionary * CFMutableDictionaryRef;
 typedef const struct __CFNumber * CFNumberRef;
 typedef const struct __CFSet * CFSetRef;
 typedef const struct __CFArray * CFArrayRef;
+typedef long CFIndex;
 typedef const struct __IOHIDManager * IOHIDManagerRef;
 typedef const struct __IOHIDDevice * IOHIDDeviceRef;
 typedef const struct __IOHIDElement * IOHIDElementRef;
@@ -105,8 +149,10 @@ typedef const struct __IOHIDValue * IOHIDValueRef;
 typedef const struct __IOHIDQueue * IOHIDQueueRef;
 typedef unsigned int IOOptionBits;
 typedef int IOReturn;
+typedef int IOHIDReportType;
 typedef unsigned int IOHIDElementCookie;
 typedef double CFTimeInterval;
+typedef unsigned char uint8_t;
 CFStringRef CFStringCreateWithCString(const void *alloc, const char *cStr, unsigned int encoding);
 CFMutableDictionaryRef CFDictionaryCreateMutable(const void *allocator, long capacity, const void *keyCallBacks, const void *valueCallBacks);
 void CFDictionarySetValue(CFMutableDictionaryRef theDict, const void *key, const void *value);
@@ -122,6 +168,7 @@ IOReturn IOHIDManagerOpen(IOHIDManagerRef manager, IOOptionBits options);
 CFSetRef IOHIDManagerCopyDevices(IOHIDManagerRef manager);
 IOReturn IOHIDDeviceOpen(IOHIDDeviceRef device, IOOptionBits options);
 CFArrayRef IOHIDDeviceCopyMatchingElements(IOHIDDeviceRef device, CFDictionaryRef matching, IOOptionBits options);
+IOReturn IOHIDDeviceGetReport(IOHIDDeviceRef device, IOHIDReportType reportType, CFIndex reportID, uint8_t *report, CFIndex *pReportLength);
 uint32_t IOHIDElementGetUsagePage(IOHIDElementRef element);
 uint32_t IOHIDElementGetUsage(IOHIDElementRef element);
 IOHIDElementCookie IOHIDElementGetCookie(IOHIDElementRef element);
@@ -350,6 +397,141 @@ CDEF;
         return [
             'buttons' => array_values($buttonsByNumber),
             'axes' => $axes,
+        ];
+    }
+
+    private function isKeyboardManiaController(): bool
+    {
+        return $this->vendorId === 0x0507 && $this->productId === 0x0010;
+    }
+
+    private function pollKeyboardManiaRawReport(mixed $device): bool
+    {
+        $report = $this->readKeyboardManiaReport($device);
+
+        if ($report === null) {
+            return false;
+        }
+
+        $previousButtons = $this->keyboardManiaButtonValues($report);
+        $latestButtons = $this->keyboardManiaButtonSnapshots($previousButtons);
+        $lastSnapshotTime = 0;
+
+        if ($this->dumpRawHid) {
+            $this->dumpKeyboardManiaRawLayout();
+
+            foreach ($latestButtons as $button) {
+                $this->dumpKeyboardManiaButtonEvent('hid_button_initial', $button, $this->timeMilliseconds());
+            }
+        }
+
+        while (true) {
+            $time = $this->timeMilliseconds();
+            $report = $this->readKeyboardManiaReport($device);
+
+            if ($report === null) {
+                return true;
+            }
+
+            $currentButtons = $this->keyboardManiaButtonValues($report);
+
+            foreach ($currentButtons as $buttonNumber => $value) {
+                $latestButtons[$buttonNumber] = $this->keyboardManiaButtonSnapshot($buttonNumber, $value);
+
+                if (($previousButtons[$buttonNumber] ?? null) === $value) {
+                    continue;
+                }
+
+                $previousButtons[$buttonNumber] = $value;
+
+                if ($this->dumpRawHid) {
+                    $this->dumpKeyboardManiaButtonEvent(
+                        'hid_button_change',
+                        $latestButtons[$buttonNumber],
+                        $time,
+                    );
+                }
+
+                $this->mapper->handleButton($buttonNumber, $value, $time);
+            }
+
+            if (
+                $this->dumpRawHid
+                && $this->dumpRawHidSnapshots
+                && $time - $lastSnapshotTime >= self::DUMP_SNAPSHOT_MILLISECONDS
+            ) {
+                $this->dumpSnapshot($latestButtons, [], $time);
+                $lastSnapshotTime = $time;
+            }
+
+            usleep(self::POLL_MICROSECONDS);
+        }
+    }
+
+    private function readKeyboardManiaReport(mixed $device): ?array
+    {
+        $report = $this->ffi->new('uint8_t[' . self::KEYBOARDMANIA_REPORT_BYTES . ']');
+        $reportLength = $this->ffi->new('CFIndex[1]');
+        $reportLength[0] = self::KEYBOARDMANIA_REPORT_BYTES;
+        $result = $this->ffi->IOHIDDeviceGetReport(
+            $device,
+            self::HID_REPORT_TYPE_INPUT,
+            0,
+            $report,
+            FFI::addr($reportLength[0]),
+        );
+
+        if ($result !== 0 || $reportLength[0] < self::KEYBOARDMANIA_REPORT_BYTES) {
+            return null;
+        }
+
+        $bytes = [];
+
+        for ($index = 0; $index < self::KEYBOARDMANIA_REPORT_BYTES; $index++) {
+            $bytes[] = $report[$index];
+        }
+
+        return $bytes;
+    }
+
+    private function keyboardManiaButtonValues(array $report): array
+    {
+        $values = [];
+
+        foreach (self::KEYBOARDMANIA_BUTTON_BITS as $buttonNumber => $bit) {
+            $values[$buttonNumber] = $this->reportBitValue($report, $bit);
+        }
+
+        return $values;
+    }
+
+    private function reportBitValue(array $report, int $bit): int
+    {
+        $byteIndex = intdiv($bit, 8);
+        $bitMask = 1 << ($bit % 8);
+
+        return (($report[$byteIndex] ?? 0) & $bitMask) !== 0 ? 1 : 0;
+    }
+
+    private function keyboardManiaButtonSnapshots(array $values): array
+    {
+        $snapshots = [];
+
+        foreach ($values as $buttonNumber => $value) {
+            $snapshots[$buttonNumber] = $this->keyboardManiaButtonSnapshot($buttonNumber, $value);
+        }
+
+        return $snapshots;
+    }
+
+    private function keyboardManiaButtonSnapshot(int $buttonNumber, int $value): array
+    {
+        return [
+            'button' => $buttonNumber,
+            'bit' => self::KEYBOARDMANIA_BUTTON_BITS[$buttonNumber],
+            'raw_value' => $value,
+            'value' => $value,
+            'active_low' => false,
         ];
     }
 
@@ -662,6 +844,39 @@ CDEF;
             'buttons' => $buttons,
             'axes' => $axes,
             'time_ms' => $this->timeMilliseconds(),
+        ]);
+    }
+
+    private function dumpKeyboardManiaRawLayout(): void
+    {
+        $buttons = [];
+
+        foreach (self::KEYBOARDMANIA_BUTTON_BITS as $buttonNumber => $bit) {
+            $buttons[] = [
+                'button' => $buttonNumber,
+                'bit' => $bit,
+            ];
+        }
+
+        $this->dumpEvent([
+            'type' => 'hid_layout',
+            'mode' => 'keyboardmania_raw_report',
+            'buttons' => $buttons,
+            'axes' => [],
+            'time_ms' => $this->timeMilliseconds(),
+        ]);
+    }
+
+    private function dumpKeyboardManiaButtonEvent(string $type, array $button, int $time): void
+    {
+        $this->dumpEvent([
+            'type' => $type,
+            'button' => $button['button'],
+            'bit' => $button['bit'],
+            'raw_value' => $button['raw_value'],
+            'value' => $button['value'],
+            'active_low' => $button['active_low'],
+            'time_ms' => $time,
         ]);
     }
 

@@ -26,6 +26,8 @@ composer install
 
 デフォルトでは `0x0507:0x0010` の HID device を読み取り、`KeyboardMania Virtual MIDI` という CoreMIDI source を作ります。
 
+Keyboardmania 専用コントローラーでは raw HID report を直接読み、写真の鍵盤配列に合わせて左から `C4` から `B5` までの2オクターブとして扱います。
+
 ```sh
 php run.php
 ```
