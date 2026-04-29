@@ -438,12 +438,15 @@ CDEF;
         }
 
         $queue = $this->createInputQueue($device, $elements);
+        $healthCheckElement = $elements['buttons'][0]['element'] ?? ($elements['axes'][0]['element'] ?? null);
+        $lastHealthCheck = $this->timeMilliseconds();
 
         while (true) {
             $time = $this->timeMilliseconds();
             $valueRef = $this->ffi->IOHIDQueueCopyNextValueWithTimeout($queue, 0.10);
 
             if ($valueRef !== null) {
+                $lastHealthCheck = $time;
                 $eventElement = $this->ffi->IOHIDValueGetElement($valueRef);
                 $cookie = $this->ffi->IOHIDElementGetCookie($eventElement);
                 $rawValue = $this->ffi->IOHIDValueGetIntegerValue($valueRef);
@@ -503,6 +506,12 @@ CDEF;
                 }
 
                 $this->ffi->CFRelease($valueRef);
+            } elseif ($healthCheckElement !== null && $time - $lastHealthCheck >= 3_000) {
+                if (!$this->isDeviceAlive($device, $healthCheckElement)) {
+                    return;
+                }
+
+                $lastHealthCheck = $time;
             }
 
             if (
@@ -516,6 +525,14 @@ CDEF;
 
             usleep(self::POLL_MICROSECONDS);
         }
+    }
+
+    private function isDeviceAlive(mixed $device, mixed $element): bool
+    {
+        $valuePointer = $this->ffi->new('IOHIDValueRef[1]');
+        $result = $this->ffi->IOHIDDeviceGetValue($device, $element, FFI::addr($valuePointer[0]));
+
+        return $result === 0;
     }
 
     /**
