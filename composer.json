@@ -6,6 +6,9 @@
   "require": {
     "php": ">=8.5"
   },
+  "scripts": {
+    "start": "php run.php"
+  },
   "autoload": {
     "psr-4": {
       "KeyboardManiaInputToVirtualMidi\\": "src/"
