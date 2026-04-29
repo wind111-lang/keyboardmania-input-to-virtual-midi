@@ -37,6 +37,10 @@ final readonly class ConsoleApplication
 
             $config = $this->loadConfig($options['config']);
 
+            if ($options['dump_hid']) {
+                $this->runHidDump($options, $config);
+            }
+
             $this->runInput($options, $config);
         } catch (JsonException $exception) {
             return $this->fail("Failed to parse keymap JSON: {$exception->getMessage()}");
@@ -55,6 +59,7 @@ final readonly class ConsoleApplication
      *     midi_source: string,
      *     midi_channel: int,
      *     test_note: string|null,
+     *     dump_hid: bool,
      *     help: bool
      * }
      */
@@ -68,6 +73,7 @@ final readonly class ConsoleApplication
             'midi_source' => self::DEFAULT_MIDI_SOURCE,
             'midi_channel' => 1,
             'test_note' => null,
+            'dump_hid' => false,
             'help' => false,
         ];
 
@@ -178,6 +184,11 @@ final readonly class ConsoleApplication
                 continue;
             }
 
+            if ($argument === '--dump-hid') {
+                $options['dump_hid'] = true;
+                continue;
+            }
+
             throw new InvalidArgumentException("Unknown argument: {$argument}");
         }
 
@@ -190,7 +201,8 @@ final readonly class ConsoleApplication
      *     product_id: int,
      *     output: string,
      *     midi_source: string,
-     *     midi_channel: int
+     *     midi_channel: int,
+     *     dump_hid: bool
      * } $options
      * @param array<mixed> $config
      */
@@ -201,6 +213,28 @@ final readonly class ConsoleApplication
             $options['product_id'],
             $config,
             $this->createOutput($options),
+            $options['dump_hid'],
+        );
+
+        $runner->run();
+    }
+
+    /**
+     * @param array{
+     *     vendor_id: int,
+     *     product_id: int,
+     *     dump_hid: bool
+     * } $options
+     * @param array<mixed> $config
+     */
+    private function runHidDump(array $options, array $config): never
+    {
+        $runner = new HidInputToVirtualMidi(
+            $options['vendor_id'],
+            $options['product_id'],
+            $config,
+            new JsonEventOutput(),
+            $options['dump_hid'],
         );
 
         $runner->run();
@@ -423,6 +457,7 @@ final readonly class ConsoleApplication
 Usage:
   php run.php [--output json|midi|both] [--config PATH]
   php run.php --test-note NOTE
+  php run.php --dump-hid
 
 Options:
   -o, --output MODE   Output: json, midi, or both (default: midi)
@@ -432,6 +467,7 @@ Options:
       --midi-source N CoreMIDI source name (default: KeyboardMania Virtual MIDI)
       --midi-channel N MIDI channel, 1-16 (default: 1)
       --test-note N   Send a repeating CoreMIDI test note without reading HID input
+      --dump-hid      Print raw HID snapshots and changes without creating MIDI output
   -h, --help          Show this help
 
 Examples:
@@ -439,6 +475,7 @@ Examples:
   php run.php --output midi
   php run.php --output both
   php run.php --test-note C4
+  php run.php --dump-hid
 
 The command waits if the selected HID device does not exist yet.
 

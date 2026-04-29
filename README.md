@@ -48,6 +48,12 @@ HID input を使わず、CoreMIDI source からテストノートだけを送る
 php run.php --test-note C4
 ```
 
+CoreMIDI output を作らず、HID input の raw 値だけを確認する場合:
+
+```sh
+php run.php --dump-hid
+```
+
 別の USB vendor/product ID を指定する場合:
 
 ```sh
@@ -85,3 +91,11 @@ VCV Rack 側では `MIDI-CV` module の Driver を `Core MIDI`、Device を `Key
 ```sh
 php run.php --output both
 ```
+
+`--output both` で何も出ない場合は、変換前の HID raw 値を見ます。
+
+```sh
+php run.php --dump-hid
+```
+
+鍵盤を押しても `hid_button_change` が出ない場合は、鍵盤を押したまま1秒ごとの `hid_snapshot` を確認してください。snapshot 内の `raw_value` が変わっていれば keymap/変換側、変わっていなければ IOHID の読み取り側を見直します。

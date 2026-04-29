@@ -12,6 +12,7 @@ final class HidInputToVirtualMidi
 {
     private const int DEVICE_RETRY_MICROSECONDS = 1_000_000;
     private const int POLL_MICROSECONDS = 4_000;
+    private const int DUMP_SNAPSHOT_MILLISECONDS = 1_000;
     private const int CF_STRING_ENCODING_UTF8 = 0x08000100;
     private const int CF_NUMBER_INT_TYPE = 9;
     private const int HID_PAGE_GENERIC_DESKTOP = 0x01;
@@ -36,6 +37,7 @@ final class HidInputToVirtualMidi
         private readonly int $productId,
         array $config,
         ControllerEventOutput $output = new JsonEventOutput(),
+        private readonly bool $dumpRawHid = false,
     ) {
         $this->mapper = new ControllerEventMapper($config, $output);
         $this->ffi = $this->createFfi();
@@ -63,6 +65,11 @@ final class HidInputToVirtualMidi
                     count($elements['axes']),
                 ),
             );
+
+            if ($this->dumpRawHid) {
+                fwrite(STDERR, "Dumping raw HID input. Hold buttons through a snapshot if changes do not appear.\n");
+                $this->dumpElementLayout($elements);
+            }
 
             $this->pollDevice($device, $elements);
             $this->mapper->reset();
@@ -231,8 +238,8 @@ CDEF;
 
     /**
      * @return array{
-     *     buttons: list<array{button: int, usage: int, element: mixed}>,
-     *     axes: list<array{axis: int, usage: int, element: mixed}>
+     *     buttons: list<array{button: int, usage: int, cookie: int, element: mixed}>,
+     *     axes: list<array{axis: int, usage: int, cookie: int, element: mixed}>
      * }
      */
     private function discoverElements(mixed $device): array
@@ -269,6 +276,7 @@ CDEF;
                     $buttonsByNumber[$usage - 1] = [
                         'button' => $usage - 1,
                         'usage' => $usage,
+                        'cookie' => $this->ffi->IOHIDElementGetCookie($element),
                         'element' => $element,
                     ];
                 } else {
@@ -289,6 +297,7 @@ CDEF;
                 $axes[] = [
                     'axis' => 0,
                     'usage' => $usage,
+                    'cookie' => $this->ffi->IOHIDElementGetCookie($element),
                     'element' => $element,
                 ];
                 continue;
@@ -298,6 +307,7 @@ CDEF;
                 $axes[] = [
                     'axis' => 1,
                     'usage' => $usage,
+                    'cookie' => $this->ffi->IOHIDElementGetCookie($element),
                     'element' => $element,
                 ];
             }
@@ -316,6 +326,7 @@ CDEF;
             $buttonsByNumber[$nextButton] = [
                 'button' => $nextButton,
                 'usage' => $element['usage'],
+                'cookie' => $element['cookie'],
                 'element' => $element['element'],
             ];
             $nextButton++;
@@ -329,8 +340,8 @@ CDEF;
 
     /**
      * @param array{
-     *     buttons: list<array{button: int, usage: int, element: mixed}>,
-     *     axes: list<array{axis: int, usage: int, element: mixed}>
+     *     buttons: list<array{button: int, usage: int, cookie: int, element: mixed}>,
+     *     axes: list<array{axis: int, usage: int, cookie: int, element: mixed}>
      * } $elements
      */
     private function pollDevice(mixed $device, array $elements): void
@@ -338,6 +349,9 @@ CDEF;
         $previousButtons = [];
         $previousAxes = [];
         $activeLowButtons = [];
+        $latestButtons = [];
+        $latestAxes = [];
+        $lastSnapshotTime = 0;
         $inputCount = count($elements['buttons']) + count($elements['axes']);
 
         if ($inputCount === 0) {
@@ -346,6 +360,7 @@ CDEF;
 
         while (true) {
             $failedReads = 0;
+            $time = $this->timeMilliseconds();
 
             foreach ($elements['buttons'] as $button) {
                 $rawValue = $this->readElementValue($device, $button['element']);
@@ -364,9 +379,29 @@ CDEF;
                 $value = $activeLowButtons[$buttonNumber]
                     ? ($rawValue === 0 ? 1 : 0)
                     : ($rawValue === 0 ? 0 : 1);
+                $latestButtons[$buttonNumber] = [
+                    'button' => $buttonNumber,
+                    'usage' => $button['usage'],
+                    'cookie' => $button['cookie'],
+                    'raw_value' => $rawValue,
+                    'value' => $value,
+                    'active_low' => $activeLowButtons[$buttonNumber],
+                ];
 
                 if (!array_key_exists($buttonNumber, $previousButtons)) {
                     $previousButtons[$buttonNumber] = $value;
+
+                    if ($this->dumpRawHid) {
+                        $this->dumpButtonEvent(
+                            'hid_button_initial',
+                            $button,
+                            $rawValue,
+                            $value,
+                            $activeLowButtons[$buttonNumber],
+                            $time,
+                        );
+                    }
+
                     continue;
                 }
 
@@ -375,7 +410,19 @@ CDEF;
                 }
 
                 $previousButtons[$buttonNumber] = $value;
-                $this->mapper->handleButton($buttonNumber, $value, $this->timeMilliseconds());
+
+                if ($this->dumpRawHid) {
+                    $this->dumpButtonEvent(
+                        'hid_button_change',
+                        $button,
+                        $rawValue,
+                        $value,
+                        $activeLowButtons[$buttonNumber],
+                        $time,
+                    );
+                }
+
+                $this->mapper->handleButton($buttonNumber, $value, $time);
             }
 
             foreach ($elements['axes'] as $axis) {
@@ -388,9 +435,21 @@ CDEF;
 
                 $axisNumber = $axis['axis'];
                 $value = $this->scaledAxisValue($rawValue);
+                $latestAxes[$axisNumber] = [
+                    'axis' => $axisNumber,
+                    'usage' => $axis['usage'],
+                    'cookie' => $axis['cookie'],
+                    'raw_value' => $rawValue,
+                    'value' => $value,
+                ];
 
                 if (!array_key_exists($axisNumber, $previousAxes)) {
                     $previousAxes[$axisNumber] = $value;
+
+                    if ($this->dumpRawHid) {
+                        $this->dumpAxisEvent('hid_axis_initial', $axis, $rawValue, $value, $time);
+                    }
+
                     continue;
                 }
 
@@ -399,7 +458,20 @@ CDEF;
                 }
 
                 $previousAxes[$axisNumber] = $value;
-                $this->mapper->handleAxis($axisNumber, $value, $this->timeMilliseconds());
+
+                if ($this->dumpRawHid) {
+                    $this->dumpAxisEvent('hid_axis_change', $axis, $rawValue, $value, $time);
+                }
+
+                $this->mapper->handleAxis($axisNumber, $value, $time);
+            }
+
+            if (
+                $this->dumpRawHid
+                && $time - $lastSnapshotTime >= self::DUMP_SNAPSHOT_MILLISECONDS
+            ) {
+                $this->dumpSnapshot($latestButtons, $latestAxes, $time);
+                $lastSnapshotTime = $time;
             }
 
             if ($failedReads >= $inputCount) {
@@ -442,5 +514,126 @@ CDEF;
     private function timeMilliseconds(): int
     {
         return (int) round(hrtime(true) / 1_000_000);
+    }
+
+    /**
+     * @param array{
+     *     buttons: list<array{button: int, usage: int, cookie: int, element: mixed}>,
+     *     axes: list<array{axis: int, usage: int, cookie: int, element: mixed}>
+     * } $elements
+     */
+    private function dumpElementLayout(array $elements): void
+    {
+        $buttons = array_map(
+            static fn (array $button): array => [
+                'button' => $button['button'],
+                'usage' => $button['usage'],
+                'cookie' => $button['cookie'],
+            ],
+            $elements['buttons'],
+        );
+        $axes = array_map(
+            static fn (array $axis): array => [
+                'axis' => $axis['axis'],
+                'usage' => $axis['usage'],
+                'cookie' => $axis['cookie'],
+            ],
+            $elements['axes'],
+        );
+
+        $this->dumpEvent([
+            'type' => 'hid_layout',
+            'buttons' => $buttons,
+            'axes' => $axes,
+            'time_ms' => $this->timeMilliseconds(),
+        ]);
+    }
+
+    /**
+     * @param array{button: int, usage: int, cookie: int, element: mixed} $button
+     */
+    private function dumpButtonEvent(
+        string $type,
+        array $button,
+        int $rawValue,
+        int $value,
+        bool $activeLow,
+        int $time,
+    ): void {
+        $this->dumpEvent([
+            'type' => $type,
+            'button' => $button['button'],
+            'usage' => $button['usage'],
+            'cookie' => $button['cookie'],
+            'raw_value' => $rawValue,
+            'value' => $value,
+            'active_low' => $activeLow,
+            'time_ms' => $time,
+        ]);
+    }
+
+    /**
+     * @param array{axis: int, usage: int, cookie: int, element: mixed} $axis
+     */
+    private function dumpAxisEvent(
+        string $type,
+        array $axis,
+        int $rawValue,
+        int $value,
+        int $time,
+    ): void {
+        $this->dumpEvent([
+            'type' => $type,
+            'axis' => $axis['axis'],
+            'usage' => $axis['usage'],
+            'cookie' => $axis['cookie'],
+            'raw_value' => $rawValue,
+            'value' => $value,
+            'time_ms' => $time,
+        ]);
+    }
+
+    /**
+     * @param array<int, array{
+     *     button: int,
+     *     usage: int,
+     *     cookie: int,
+     *     raw_value: int,
+     *     value: int,
+     *     active_low: bool
+     * }> $buttons
+     * @param array<int, array{
+     *     axis: int,
+     *     usage: int,
+     *     cookie: int,
+     *     raw_value: int,
+     *     value: int
+     * }> $axes
+     */
+    private function dumpSnapshot(array $buttons, array $axes, int $time): void
+    {
+        ksort($buttons);
+        ksort($axes);
+
+        $this->dumpEvent([
+            'type' => 'hid_snapshot',
+            'buttons' => array_values($buttons),
+            'axes' => array_values($axes),
+            'time_ms' => $time,
+        ]);
+    }
+
+    /**
+     * @param array<mixed> $payload
+     */
+    private function dumpEvent(array $payload): void
+    {
+        $json = json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+        if ($json === false) {
+            return;
+        }
+
+        fwrite(STDOUT, $json . "\n");
     }
 }
