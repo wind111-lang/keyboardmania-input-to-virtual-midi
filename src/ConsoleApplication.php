@@ -60,6 +60,7 @@ final readonly class ConsoleApplication
      *     midi_channel: int,
      *     test_note: string|null,
      *     dump_hid: bool,
+     *     dump_hid_snapshots: bool,
      *     help: bool
      * }
      */
@@ -74,6 +75,7 @@ final readonly class ConsoleApplication
             'midi_channel' => 1,
             'test_note' => null,
             'dump_hid' => false,
+            'dump_hid_snapshots' => false,
             'help' => false,
         ];
 
@@ -189,6 +191,12 @@ final readonly class ConsoleApplication
                 continue;
             }
 
+            if ($argument === '--dump-hid-snapshots') {
+                $options['dump_hid'] = true;
+                $options['dump_hid_snapshots'] = true;
+                continue;
+            }
+
             throw new InvalidArgumentException("Unknown argument: {$argument}");
         }
 
@@ -202,7 +210,8 @@ final readonly class ConsoleApplication
      *     output: string,
      *     midi_source: string,
      *     midi_channel: int,
-     *     dump_hid: bool
+     *     dump_hid: bool,
+     *     dump_hid_snapshots: bool
      * } $options
      * @param array<mixed> $config
      */
@@ -214,6 +223,7 @@ final readonly class ConsoleApplication
             $config,
             $this->createOutput($options),
             $options['dump_hid'],
+            $options['dump_hid_snapshots'],
         );
 
         $runner->run();
@@ -223,7 +233,8 @@ final readonly class ConsoleApplication
      * @param array{
      *     vendor_id: int,
      *     product_id: int,
-     *     dump_hid: bool
+     *     dump_hid: bool,
+     *     dump_hid_snapshots: bool
      * } $options
      * @param array<mixed> $config
      */
@@ -235,6 +246,7 @@ final readonly class ConsoleApplication
             $config,
             new JsonEventOutput(),
             $options['dump_hid'],
+            $options['dump_hid_snapshots'],
         );
 
         $runner->run();
@@ -457,7 +469,7 @@ final readonly class ConsoleApplication
 Usage:
   php run.php [--output json|midi|both] [--config PATH]
   php run.php --test-note NOTE
-  php run.php --dump-hid
+  php run.php --dump-hid [--dump-hid-snapshots]
 
 Options:
   -o, --output MODE   Output: json, midi, or both (default: midi)
@@ -467,7 +479,9 @@ Options:
       --midi-source N CoreMIDI source name (default: KeyboardMania Virtual MIDI)
       --midi-channel N MIDI channel, 1-16 (default: 1)
       --test-note N   Send a repeating CoreMIDI test note without reading HID input
-      --dump-hid      Print raw HID snapshots and changes without creating MIDI output
+      --dump-hid      Print raw HID initial values and changes without MIDI output
+      --dump-hid-snapshots
+                     Also print one raw HID snapshot per second
   -h, --help          Show this help
 
 Examples:
@@ -476,6 +490,7 @@ Examples:
   php run.php --output both
   php run.php --test-note C4
   php run.php --dump-hid
+  php run.php --dump-hid --dump-hid-snapshots
 
 The command waits if the selected HID device does not exist yet.
 

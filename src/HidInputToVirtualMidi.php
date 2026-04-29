@@ -30,6 +30,8 @@ final class HidInputToVirtualMidi
 
     private mixed $deviceSetValues = null;
 
+    private mixed $inputQueue = null;
+
     private array $retainedCoreFoundationValues = [];
 
     public function __construct(
@@ -38,6 +40,7 @@ final class HidInputToVirtualMidi
         array $config,
         ControllerEventOutput $output = new JsonEventOutput(),
         private readonly bool $dumpRawHid = false,
+        private readonly bool $dumpRawHidSnapshots = false,
     ) {
         $this->mapper = new ControllerEventMapper($config, $output);
         $this->ffi = $this->createFfi();
@@ -67,7 +70,10 @@ final class HidInputToVirtualMidi
             );
 
             if ($this->dumpRawHid) {
-                fwrite(STDERR, "Dumping raw HID input. Hold buttons through a snapshot if changes do not appear.\n");
+                $message = $this->dumpRawHidSnapshots
+                    ? "Dumping raw HID input with one snapshot per second.\n"
+                    : "Dumping raw HID input changes. Add --dump-hid-snapshots to include snapshots.\n";
+                fwrite(STDERR, $message);
                 $this->dumpElementLayout($elements);
             }
 
@@ -96,13 +102,16 @@ typedef const struct __IOHIDManager * IOHIDManagerRef;
 typedef const struct __IOHIDDevice * IOHIDDeviceRef;
 typedef const struct __IOHIDElement * IOHIDElementRef;
 typedef const struct __IOHIDValue * IOHIDValueRef;
+typedef const struct __IOHIDQueue * IOHIDQueueRef;
 typedef unsigned int IOOptionBits;
 typedef int IOReturn;
 typedef unsigned int IOHIDElementCookie;
+typedef double CFTimeInterval;
 CFStringRef CFStringCreateWithCString(const void *alloc, const char *cStr, unsigned int encoding);
 CFMutableDictionaryRef CFDictionaryCreateMutable(const void *allocator, long capacity, const void *keyCallBacks, const void *valueCallBacks);
 void CFDictionarySetValue(CFMutableDictionaryRef theDict, const void *key, const void *value);
 CFNumberRef CFNumberCreate(const void *allocator, int theType, const void *valuePtr);
+void CFRelease(CFTypeRef cf);
 long CFSetGetCount(CFSetRef theSet);
 void CFSetGetValues(CFSetRef theSet, const void **values);
 long CFArrayGetCount(CFArrayRef theArray);
@@ -118,6 +127,12 @@ uint32_t IOHIDElementGetUsage(IOHIDElementRef element);
 IOHIDElementCookie IOHIDElementGetCookie(IOHIDElementRef element);
 size_t IOHIDElementGetReportSize(IOHIDElementRef element);
 IOReturn IOHIDDeviceGetValue(IOHIDDeviceRef device, IOHIDElementRef element, IOHIDValueRef *pValue);
+IOHIDQueueRef IOHIDQueueCreate(const void *allocator, IOHIDDeviceRef device, long depth, IOOptionBits options);
+void IOHIDQueueAddElement(IOHIDQueueRef queue, IOHIDElementRef element);
+void IOHIDQueueStart(IOHIDQueueRef queue);
+void IOHIDQueueStop(IOHIDQueueRef queue);
+IOHIDValueRef IOHIDQueueCopyNextValueWithTimeout(IOHIDQueueRef queue, CFTimeInterval timeout);
+IOHIDElementRef IOHIDValueGetElement(IOHIDValueRef value);
 long IOHIDValueGetIntegerValue(IOHIDValueRef value);
 CDEF;
 
@@ -358,128 +373,229 @@ CDEF;
             return;
         }
 
+        foreach ($elements['buttons'] as $button) {
+            $rawValue = $this->readElementValue($device, $button['element']);
+
+            if ($rawValue === null) {
+                continue;
+            }
+
+            $buttonNumber = $button['button'];
+            $activeLowButtons[$buttonNumber] = $rawValue === 1;
+            $value = $this->normalizedButtonValue($rawValue, $activeLowButtons[$buttonNumber]);
+            $previousButtons[$buttonNumber] = $value;
+            $latestButtons[$buttonNumber] = $this->buttonSnapshot(
+                $button,
+                $rawValue,
+                $value,
+                $activeLowButtons[$buttonNumber],
+            );
+
+            if ($this->dumpRawHid) {
+                $this->dumpButtonEvent(
+                    'hid_button_initial',
+                    $button,
+                    $rawValue,
+                    $value,
+                    $activeLowButtons[$buttonNumber],
+                    $this->timeMilliseconds(),
+                );
+            }
+        }
+
+        foreach ($elements['axes'] as $axis) {
+            $rawValue = $this->readElementValue($device, $axis['element']);
+
+            if ($rawValue === null) {
+                continue;
+            }
+
+            $axisNumber = $axis['axis'];
+            $value = $this->scaledAxisValue($rawValue);
+            $previousAxes[$axisNumber] = $value;
+            $latestAxes[$axisNumber] = $this->axisSnapshot($axis, $rawValue, $value);
+
+            if ($this->dumpRawHid) {
+                $this->dumpAxisEvent(
+                    'hid_axis_initial',
+                    $axis,
+                    $rawValue,
+                    $value,
+                    $this->timeMilliseconds(),
+                );
+            }
+        }
+
+        $buttonsByCookie = [];
+        $axesByCookie = [];
+
+        foreach ($elements['buttons'] as $button) {
+            $buttonsByCookie[$button['cookie']] = $button;
+        }
+
+        foreach ($elements['axes'] as $axis) {
+            $axesByCookie[$axis['cookie']] = $axis;
+        }
+
+        $queue = $this->createInputQueue($device, $elements);
+
         while (true) {
-            $failedReads = 0;
             $time = $this->timeMilliseconds();
+            $valueRef = $this->ffi->IOHIDQueueCopyNextValueWithTimeout($queue, 0.10);
 
-            foreach ($elements['buttons'] as $button) {
-                $rawValue = $this->readElementValue($device, $button['element']);
+            if ($valueRef !== null) {
+                $eventElement = $this->ffi->IOHIDValueGetElement($valueRef);
+                $cookie = $this->ffi->IOHIDElementGetCookie($eventElement);
+                $rawValue = $this->ffi->IOHIDValueGetIntegerValue($valueRef);
 
-                if ($rawValue === null) {
-                    $failedReads++;
-                    continue;
-                }
+                if (isset($buttonsByCookie[$cookie])) {
+                    $button = $buttonsByCookie[$cookie];
+                    $buttonNumber = $button['button'];
 
-                $buttonNumber = $button['button'];
-
-                if (!array_key_exists($buttonNumber, $activeLowButtons)) {
-                    $activeLowButtons[$buttonNumber] = $rawValue === 1;
-                }
-
-                $value = $activeLowButtons[$buttonNumber]
-                    ? ($rawValue === 0 ? 1 : 0)
-                    : ($rawValue === 0 ? 0 : 1);
-                $latestButtons[$buttonNumber] = [
-                    'button' => $buttonNumber,
-                    'usage' => $button['usage'],
-                    'cookie' => $button['cookie'],
-                    'raw_value' => $rawValue,
-                    'value' => $value,
-                    'active_low' => $activeLowButtons[$buttonNumber],
-                ];
-
-                if (!array_key_exists($buttonNumber, $previousButtons)) {
-                    $previousButtons[$buttonNumber] = $value;
-
-                    if ($this->dumpRawHid) {
-                        $this->dumpButtonEvent(
-                            'hid_button_initial',
-                            $button,
-                            $rawValue,
-                            $value,
-                            $activeLowButtons[$buttonNumber],
-                            $time,
-                        );
+                    if (!isset($activeLowButtons[$buttonNumber])) {
+                        $activeLowButtons[$buttonNumber] = $rawValue === 1;
                     }
 
-                    continue;
-                }
-
-                if ($previousButtons[$buttonNumber] === $value) {
-                    continue;
-                }
-
-                $previousButtons[$buttonNumber] = $value;
-
-                if ($this->dumpRawHid) {
-                    $this->dumpButtonEvent(
-                        'hid_button_change',
+                    $value = $this->normalizedButtonValue(
+                        $rawValue,
+                        $activeLowButtons[$buttonNumber],
+                    );
+                    $latestButtons[$buttonNumber] = $this->buttonSnapshot(
                         $button,
                         $rawValue,
                         $value,
                         $activeLowButtons[$buttonNumber],
-                        $time,
                     );
-                }
 
-                $this->mapper->handleButton($buttonNumber, $value, $time);
-            }
+                    if (($previousButtons[$buttonNumber] ?? null) !== $value) {
+                        $previousButtons[$buttonNumber] = $value;
 
-            foreach ($elements['axes'] as $axis) {
-                $rawValue = $this->readElementValue($device, $axis['element']);
+                        if ($this->dumpRawHid) {
+                            $this->dumpButtonEvent(
+                                'hid_button_change',
+                                $button,
+                                $rawValue,
+                                $value,
+                                $activeLowButtons[$buttonNumber],
+                                $time,
+                            );
+                        }
 
-                if ($rawValue === null) {
-                    $failedReads++;
-                    continue;
-                }
-
-                $axisNumber = $axis['axis'];
-                $value = $this->scaledAxisValue($rawValue);
-                $latestAxes[$axisNumber] = [
-                    'axis' => $axisNumber,
-                    'usage' => $axis['usage'],
-                    'cookie' => $axis['cookie'],
-                    'raw_value' => $rawValue,
-                    'value' => $value,
-                ];
-
-                if (!array_key_exists($axisNumber, $previousAxes)) {
-                    $previousAxes[$axisNumber] = $value;
-
-                    if ($this->dumpRawHid) {
-                        $this->dumpAxisEvent('hid_axis_initial', $axis, $rawValue, $value, $time);
+                        $this->mapper->handleButton($buttonNumber, $value, $time);
                     }
-
-                    continue;
                 }
 
-                if ($previousAxes[$axisNumber] === $value) {
-                    continue;
+                if (isset($axesByCookie[$cookie])) {
+                    $axis = $axesByCookie[$cookie];
+                    $axisNumber = $axis['axis'];
+                    $value = $this->scaledAxisValue($rawValue);
+                    $latestAxes[$axisNumber] = $this->axisSnapshot($axis, $rawValue, $value);
+
+                    if (($previousAxes[$axisNumber] ?? null) !== $value) {
+                        $previousAxes[$axisNumber] = $value;
+
+                        if ($this->dumpRawHid) {
+                            $this->dumpAxisEvent('hid_axis_change', $axis, $rawValue, $value, $time);
+                        }
+
+                        $this->mapper->handleAxis($axisNumber, $value, $time);
+                    }
                 }
 
-                $previousAxes[$axisNumber] = $value;
-
-                if ($this->dumpRawHid) {
-                    $this->dumpAxisEvent('hid_axis_change', $axis, $rawValue, $value, $time);
-                }
-
-                $this->mapper->handleAxis($axisNumber, $value, $time);
+                $this->ffi->CFRelease($valueRef);
             }
 
             if (
                 $this->dumpRawHid
+                && $this->dumpRawHidSnapshots
                 && $time - $lastSnapshotTime >= self::DUMP_SNAPSHOT_MILLISECONDS
             ) {
                 $this->dumpSnapshot($latestButtons, $latestAxes, $time);
                 $lastSnapshotTime = $time;
             }
 
-            if ($failedReads >= $inputCount) {
-                return;
-            }
-
             usleep(self::POLL_MICROSECONDS);
         }
+    }
+
+    /**
+     * @param array{
+     *     buttons: list<array{button: int, usage: int, cookie: int, element: mixed}>,
+     *     axes: list<array{axis: int, usage: int, cookie: int, element: mixed}>
+     * } $elements
+     */
+    private function createInputQueue(mixed $device, array $elements): mixed
+    {
+        $depth = max(64, (count($elements['buttons']) + count($elements['axes'])) * 4);
+        $queue = $this->ffi->IOHIDQueueCreate(null, $device, $depth, 0);
+
+        if ($queue === null) {
+            throw new RuntimeException('Failed to create IOHIDQueue.');
+        }
+
+        foreach ($elements['buttons'] as $button) {
+            $this->ffi->IOHIDQueueAddElement($queue, $button['element']);
+        }
+
+        foreach ($elements['axes'] as $axis) {
+            $this->ffi->IOHIDQueueAddElement($queue, $axis['element']);
+        }
+
+        $this->ffi->IOHIDQueueStart($queue);
+        $this->inputQueue = $queue;
+
+        return $queue;
+    }
+
+    private function normalizedButtonValue(int $rawValue, bool $activeLow): int
+    {
+        if ($activeLow) {
+            return $rawValue === 0 ? 1 : 0;
+        }
+
+        return $rawValue === 0 ? 0 : 1;
+    }
+
+    /**
+     * @param array{button: int, usage: int, cookie: int, element: mixed} $button
+     * @return array{
+     *     button: int,
+     *     usage: int,
+     *     cookie: int,
+     *     raw_value: int,
+     *     value: int,
+     *     active_low: bool
+     * }
+     */
+    private function buttonSnapshot(
+        array $button,
+        int $rawValue,
+        int $value,
+        bool $activeLow,
+    ): array {
+        return [
+            'button' => $button['button'],
+            'usage' => $button['usage'],
+            'cookie' => $button['cookie'],
+            'raw_value' => $rawValue,
+            'value' => $value,
+            'active_low' => $activeLow,
+        ];
+    }
+
+    /**
+     * @param array{axis: int, usage: int, cookie: int, element: mixed} $axis
+     * @return array{axis: int, usage: int, cookie: int, raw_value: int, value: int}
+     */
+    private function axisSnapshot(array $axis, int $rawValue, int $value): array
+    {
+        return [
+            'axis' => $axis['axis'],
+            'usage' => $axis['usage'],
+            'cookie' => $axis['cookie'],
+            'raw_value' => $rawValue,
+            'value' => $value,
+        ];
     }
 
     private function readElementValue(mixed $device, mixed $element): ?int

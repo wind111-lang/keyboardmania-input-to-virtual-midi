@@ -54,6 +54,12 @@ CoreMIDI output を作らず、HID input の raw 値だけを確認する場合:
 php run.php --dump-hid
 ```
 
+押しっぱなし状態を1秒ごとの snapshot でも確認したい場合:
+
+```sh
+php run.php --dump-hid --dump-hid-snapshots
+```
+
 別の USB vendor/product ID を指定する場合:
 
 ```sh
@@ -98,4 +104,10 @@ php run.php --output both
 php run.php --dump-hid
 ```
 
-鍵盤を押しても `hid_button_change` が出ない場合は、鍵盤を押したまま1秒ごとの `hid_snapshot` を確認してください。snapshot 内の `raw_value` が変わっていれば keymap/変換側、変わっていなければ IOHID の読み取り側を見直します。
+鍵盤を押しても `hid_button_change` が出ない場合は、鍵盤を押したまま1秒ごとの `hid_snapshot` を確認してください。
+
+```sh
+php run.php --dump-hid --dump-hid-snapshots
+```
+
+snapshot 内の `raw_value` が変わっていれば keymap/変換側、変わっていなければ IOHID の読み取り側を見直します。
