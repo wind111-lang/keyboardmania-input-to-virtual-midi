@@ -8,7 +8,7 @@ GarageBand、MainStage、Logic Pro、REAPER など、CoreMIDI 入力を扱える
 
 このプロジェクトの利用には Keyboardmania 専用コントローラーが必要です。
 
-製造元が `KONAMI` として認識される Keyboardmania 専用コントローラーのみを対象にしています。
+USB vendor/product ID が `0x0507:0x0010` の Keyboardmania 専用コントローラーのみを対象にしています。この ID は内部固定で、別のデバイス ID を指定するための option はありません。
 
 対象の Keyboardmania 専用コントローラーがまだ認識されていない場合、入力読み取りはデバイスが認識されるまで待機します。
 
@@ -30,13 +30,13 @@ composer install
 
 `src/Mapping` は HID の button/axis event を note/control event に変換します。鍵盤割り当ては `config/keymap.json` で調整します。
 
-`src/Output` は変換後の event を JSON または CoreMIDI に出力します。
+`src/Output` は変換後の event を CoreMIDI に出力します。debug 用の event 表示も CoreMIDI output 側に集約しています。
 
 `src/Contract` には output 実装が満たす interface を置いています。
 
 ## Usage
 
-製造元が `KONAMI` の HID device を読み取り、`KeyboardMania Virtual MIDI` という固定名の CoreMIDI source を作ります。
+Keyboardmania 専用コントローラーの HID device を読み取り、`KeyboardMania Virtual MIDI` という固定名の CoreMIDI source を作ります。
 
 ```sh
 php run.php
@@ -48,10 +48,10 @@ php run.php
 composer start
 ```
 
-JSON event も同時に確認したい場合:
+CoreMIDI を出しながら変換後の event も確認したい場合:
 
 ```sh
-php run.php --output both
+php run.php --debug-events
 ```
 
 HID input を使わず、CoreMIDI source からテストノートだけを送る場合:
@@ -92,13 +92,13 @@ php run.php --test-note C4
 
 GarageBand 側ではソフトウェア音源トラックを作成し、そのトラックを選択した状態にします。`php run.php --test-note C4` で音が鳴れば、CoreMIDI と GarageBand の設定は通っています。
 
-テストノートは鳴るのに Keyboardmania controller で鳴らない場合は、次のコマンドで HID input が `note_down` / `note_up` に変換されているか確認してください。
+テストノートは鳴るのに Keyboardmania controller で鳴らない場合は、次のコマンドで HID input が `note_down` / `note_up` に変換されているか確認してください。MIDI 送信は通常どおり行い、同じ CoreMIDI output が debug event も出します。
 
 ```sh
-php run.php --output both
+php run.php --debug-events
 ```
 
-`--output both` で何も出ない場合は、変換前の HID raw 値を見ます。
+`--debug-events` で何も出ない場合は、変換前の HID raw 値を見ます。
 
 ```sh
 php run.php --dump-hid

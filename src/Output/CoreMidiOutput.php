@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace KeyboardManiaInputToVirtualMidi\Output;
 
 use FFI;
+use FFI\Exception as FfiException;
 use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
 use RuntimeException;
-use Throwable;
 
 final class CoreMidiOutput implements ControllerEventOutput
 {
@@ -43,6 +43,7 @@ final class CoreMidiOutput implements ControllerEventOutput
     public function __construct(
         private readonly string $sourceName,
         int $channel = 1,
+        private readonly bool $debugEvents = false,
     ) {
         if (PHP_OS_FAMILY !== 'Darwin') {
             throw new RuntimeException('CoreMIDI output is only available on macOS.');
@@ -63,6 +64,10 @@ final class CoreMidiOutput implements ControllerEventOutput
 
     public function emit(array $payload): void
     {
+        if ($this->debugEvents) {
+            $this->dumpEvent($payload);
+        }
+
         $type = $payload['type'] ?? null;
 
         if ($type !== 'note_down' && $type !== 'note_up') {
@@ -138,7 +143,7 @@ CDEF;
 
         try {
             return FFI::cdef($cdef, '/System/Library/Frameworks/CoreMIDI.framework/CoreMIDI');
-        } catch (Throwable $exception) {
+        } catch (FfiException $exception) {
             throw new RuntimeException(
                 "Failed to load CoreMIDI through PHP FFI: {$exception->getMessage()}",
                 previous: $exception,
@@ -281,5 +286,19 @@ CDEF;
 
         $this->reportedInvalidNotes[$noteName] = true;
         fwrite(STDERR, "Ignoring invalid MIDI note name: {$noteName}\n");
+    }
+
+    /**
+     * @param array<mixed> $payload
+     */
+    private function dumpEvent(array $payload): void
+    {
+        $json = json_encode($payload, flags: JSON_UNESCAPED_SLASHES);
+
+        if ($json === false) {
+            return;
+        }
+
+        fwrite(STDOUT, $json . "\n");
     }
 }

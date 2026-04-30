@@ -6,9 +6,7 @@ namespace KeyboardManiaInputToVirtualMidi\Application;
 
 use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
 use KeyboardManiaInputToVirtualMidi\Input\HidInputToVirtualMidi;
-use KeyboardManiaInputToVirtualMidi\Output\CompositeEventOutput;
 use KeyboardManiaInputToVirtualMidi\Output\CoreMidiOutput;
-use KeyboardManiaInputToVirtualMidi\Output\JsonEventOutput;
 use InvalidArgumentException;
 use JsonException;
 use RuntimeException;
@@ -56,9 +54,9 @@ readonly class ConsoleApplication
     /**
      * @param list<string> $argv
      * @return array{
-     *     output: string,
      *     midi_channel: int,
      *     test_note: string|null,
+     *     debug_events: bool,
      *     dump_hid: bool,
      *     dump_hid_snapshots: bool,
      *     help: bool
@@ -67,9 +65,9 @@ readonly class ConsoleApplication
     private function parseArguments(array $argv): array
     {
         $options = [
-            'output' => 'midi',
             'midi_channel' => 1,
             'test_note' => null,
+            'debug_events' => false,
             'dump_hid' => false,
             'dump_hid_snapshots' => false,
             'help' => false,
@@ -80,20 +78,6 @@ readonly class ConsoleApplication
 
             if ($argument === '-h' || $argument === '--help') {
                 $options['help'] = true;
-                continue;
-            }
-
-            if ($argument === '-o' || $argument === '--output') {
-                $options['output'] = $this->outputMode(
-                    $this->readOptionValue($argv, $index, $argument),
-                );
-                continue;
-            }
-
-            if (str_starts_with($argument, '--output=')) {
-                $options['output'] = $this->outputMode(
-                    substr($argument, strlen('--output=')),
-                );
                 continue;
             }
 
@@ -130,6 +114,11 @@ readonly class ConsoleApplication
                 continue;
             }
 
+            if ($argument === '--debug-events') {
+                $options['debug_events'] = true;
+                continue;
+            }
+
             if ($argument === '--dump-hid') {
                 $options['dump_hid'] = true;
                 continue;
@@ -149,8 +138,8 @@ readonly class ConsoleApplication
 
     /**
      * @param array{
-     *     output: string,
      *     midi_channel: int,
+     *     debug_events: bool,
      *     dump_hid: bool,
      *     dump_hid_snapshots: bool
      * } $options
@@ -179,7 +168,7 @@ readonly class ConsoleApplication
     {
         $runner = new HidInputToVirtualMidi(
             $config,
-            new JsonEventOutput(),
+            null,
             $options['dump_hid'],
             $options['dump_hid_snapshots'],
         );
@@ -188,13 +177,14 @@ readonly class ConsoleApplication
     }
 
     /**
-     * @param array{midi_channel: int, test_note: string} $options
+     * @param array{midi_channel: int, test_note: string, debug_events: bool} $options
      */
     private function runMidiTest(array $options): never
     {
         $output = new CoreMidiOutput(
             self::MIDI_SOURCE,
             $options['midi_channel'],
+            $options['debug_events'],
         );
         $note = $options['test_note'];
 
@@ -227,26 +217,15 @@ readonly class ConsoleApplication
     }
 
     /**
-     * @param array{output: string, midi_channel: int} $options
+     * @param array{midi_channel: int, debug_events: bool} $options
      */
     private function createOutput(array $options): ControllerEventOutput
     {
-        $output = $options['output'];
-
-        return match ($output) {
-            'json' => new JsonEventOutput(),
-            'midi' => new CoreMidiOutput(
-                self::MIDI_SOURCE,
-                $options['midi_channel'],
-            ),
-            'both' => new CompositeEventOutput([
-                new JsonEventOutput(),
-                new CoreMidiOutput(
-                    self::MIDI_SOURCE,
-                    $options['midi_channel'],
-                ),
-            ]),
-        };
+        return new CoreMidiOutput(
+            self::MIDI_SOURCE,
+            $options['midi_channel'],
+            $options['debug_events'],
+        );
     }
 
     /**
@@ -278,19 +257,6 @@ readonly class ConsoleApplication
     {
         if ($value === '') {
             throw new InvalidArgumentException("Missing value for {$option}");
-        }
-
-        return $value;
-    }
-
-    private function outputMode(string $value): string
-    {
-        $value = $this->nonEmptyOptionValue($value, '--output');
-
-        if (!in_array($value, ['json', 'midi', 'both'], true)) {
-            throw new InvalidArgumentException(
-                "Invalid output mode: {$value}. Expected json, midi, or both.",
-            );
         }
 
         return $value;
@@ -402,13 +368,13 @@ readonly class ConsoleApplication
     {
         return <<<USAGE
 Usage:
-  php run.php [--output json|midi|both]
+  php run.php
   php run.php --test-note NOTE
   php run.php --dump-hid [--dump-hid-snapshots]
 
 Options:
-  -o, --output MODE   Output: json, midi, or both (default: midi)
       --midi-channel N MIDI channel, 1-16 (default: 1)
+      --debug-events Print mapped controller events while sending CoreMIDI
       --test-note N   Send a repeating CoreMIDI test note without reading HID input
       --dump-hid      Print raw HID initial values and changes without MIDI output
       --dump-hid-snapshots
@@ -417,13 +383,12 @@ Options:
 
 Examples:
   php run.php
-  php run.php --output midi
-  php run.php --output both
+  php run.php --debug-events
   php run.php --test-note C4
   php run.php --dump-hid
   php run.php --dump-hid --dump-hid-snapshots
 
-The command waits until a KONAMI HID device is detected.
+The command waits until a KeyboardMania controller is detected.
 
 USAGE;
     }

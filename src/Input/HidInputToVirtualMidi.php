@@ -5,11 +5,10 @@ declare(strict_types=1);
 namespace KeyboardManiaInputToVirtualMidi\Input;
 
 use FFI;
+use FFI\Exception as FfiException;
 use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
 use KeyboardManiaInputToVirtualMidi\Mapping\ControllerEventMapper;
-use KeyboardManiaInputToVirtualMidi\Output\JsonEventOutput;
 use RuntimeException;
-use Throwable;
 
 class HidInputToVirtualMidi
 {
@@ -17,13 +16,15 @@ class HidInputToVirtualMidi
     private const int POLL_MICROSECONDS = 4_000;
     private const int DUMP_SNAPSHOT_MILLISECONDS = 1_000;
     private const int CF_STRING_ENCODING_UTF8 = 0x08000100;
-    private const string MANUFACTURER = 'KONAMI';
+    private const int CF_NUMBER_INT_TYPE = 9;
+    private const int VENDOR_ID = 0x0507;
+    private const int PRODUCT_ID = 0x0010;
     private const int HID_PAGE_GENERIC_DESKTOP = 0x01;
     private const int HID_PAGE_BUTTON = 0x09;
     private const int HID_USAGE_X = 0x30;
     private const int HID_USAGE_Y = 0x31;
 
-    private readonly ControllerEventMapper $mapper;
+    private readonly ?ControllerEventMapper $mapper;
 
     private readonly FFI $ffi;
 
@@ -39,11 +40,11 @@ class HidInputToVirtualMidi
 
     public function __construct(
         array $config,
-        ControllerEventOutput $output = new JsonEventOutput(),
+        ?ControllerEventOutput $output,
         private readonly bool $dumpRawHid = false,
         private readonly bool $dumpRawHidSnapshots = false,
     ) {
-        $this->mapper = new ControllerEventMapper($config, $output);
+        $this->mapper = $output === null ? null : new ControllerEventMapper($config, $output);
         $this->ffi = $this->createFfi();
     }
 
@@ -62,8 +63,9 @@ class HidInputToVirtualMidi
             fwrite(
                 STDERR,
                 sprintf(
-                    "Reading HID input: manufacturer %s (%d buttons, %d axes)\n",
-                    self::MANUFACTURER,
+                    "Reading HID input: KeyboardMania controller 0x%04x:0x%04x (%d buttons, %d axes)\n",
+                    self::VENDOR_ID,
+                    self::PRODUCT_ID,
                     count($elements['buttons']),
                     count($elements['axes']),
                 ),
@@ -78,7 +80,7 @@ class HidInputToVirtualMidi
             }
 
             $this->pollDevice($device, $elements);
-            $this->mapper->reset();
+            $this->mapper?->reset();
 
             fwrite(STDERR, "HID input stopped. Waiting for device to return...\n");
         }
@@ -95,6 +97,7 @@ typedef const void * CFTypeRef;
 typedef const struct __CFString * CFStringRef;
 typedef const struct __CFDictionary * CFDictionaryRef;
 typedef struct __CFDictionary * CFMutableDictionaryRef;
+typedef const struct __CFNumber * CFNumberRef;
 typedef const struct __CFSet * CFSetRef;
 typedef const struct __CFArray * CFArrayRef;
 typedef const struct __IOHIDManager * IOHIDManagerRef;
@@ -109,6 +112,7 @@ typedef double CFTimeInterval;
 CFStringRef CFStringCreateWithCString(const void *alloc, const char *cStr, unsigned int encoding);
 CFMutableDictionaryRef CFDictionaryCreateMutable(const void *allocator, long capacity, const void *keyCallBacks, const void *valueCallBacks);
 void CFDictionarySetValue(CFMutableDictionaryRef theDict, const void *key, const void *value);
+CFNumberRef CFNumberCreate(const void *allocator, int theType, const void *valuePtr);
 void CFRelease(CFTypeRef cf);
 long CFSetGetCount(CFSetRef theSet);
 void CFSetGetValues(CFSetRef theSet, const void **values);
@@ -136,7 +140,7 @@ CDEF;
 
         try {
             return FFI::cdef($cdef, '/System/Library/Frameworks/IOKit.framework/IOKit');
-        } catch (Throwable $exception) {
+        } catch (FfiException $exception) {
             throw new RuntimeException(
                 "Failed to load IOKit through PHP FFI: {$exception->getMessage()}",
                 previous: $exception,
@@ -172,8 +176,9 @@ CDEF;
                 fwrite(
                     STDERR,
                     sprintf(
-                        "Waiting for HID device: manufacturer %s\n",
-                        self::MANUFACTURER,
+                        "Waiting for KeyboardMania controller: 0x%04x:0x%04x\n",
+                        self::VENDOR_ID,
+                        self::PRODUCT_ID,
                     ),
                 );
                 $reportedWaiting = true;
@@ -186,24 +191,43 @@ CDEF;
     private function createMatchingDictionary(): mixed
     {
         $dictionary = $this->ffi->CFDictionaryCreateMutable(null, 0, null, null);
-        $manufacturerKey = $this->ffi->CFStringCreateWithCString(
+        $vendorKey = $this->ffi->CFStringCreateWithCString(
             null,
-            'Manufacturer',
+            'VendorID',
             self::CF_STRING_ENCODING_UTF8,
         );
-        $manufacturerValue = $this->ffi->CFStringCreateWithCString(
+        $productKey = $this->ffi->CFStringCreateWithCString(
             null,
-            self::MANUFACTURER,
+            'ProductID',
             self::CF_STRING_ENCODING_UTF8,
+        );
+        $vendorBuffer = $this->ffi->new('int[1]');
+        $vendorBuffer[0] = self::VENDOR_ID;
+        $productBuffer = $this->ffi->new('int[1]');
+        $productBuffer[0] = self::PRODUCT_ID;
+        $vendorValue = $this->ffi->CFNumberCreate(
+            null,
+            self::CF_NUMBER_INT_TYPE,
+            $vendorBuffer,
+        );
+        $productValue = $this->ffi->CFNumberCreate(
+            null,
+            self::CF_NUMBER_INT_TYPE,
+            $productBuffer,
         );
 
-        $this->ffi->CFDictionarySetValue($dictionary, $manufacturerKey, $manufacturerValue);
+        $this->ffi->CFDictionarySetValue($dictionary, $vendorKey, $vendorValue);
+        $this->ffi->CFDictionarySetValue($dictionary, $productKey, $productValue);
 
         // Keep CF objects alive because the dictionary uses null callbacks.
         $this->retainedCoreFoundationValues = [
             $dictionary,
-            $manufacturerKey,
-            $manufacturerValue,
+            $vendorKey,
+            $productKey,
+            $vendorValue,
+            $productValue,
+            $vendorBuffer,
+            $productBuffer,
         ];
 
         return $dictionary;
