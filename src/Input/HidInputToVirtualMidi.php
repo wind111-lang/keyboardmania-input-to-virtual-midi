@@ -445,7 +445,7 @@ CDEF;
 
         while (true) {
             $time = $this->timeMilliseconds();
-            $valueRef = $this->ffi->IOHIDQueueCopyNextValueWithTimeout($queue, 0.10);
+            $valueRef = $this->ffi->IOHIDQueueCopyNextValueWithTimeout($queue, 0.01);
 
             if ($valueRef !== null) {
                 $lastHealthCheck = $time;
@@ -508,7 +508,73 @@ CDEF;
                 }
 
                 $this->ffi->CFRelease($valueRef);
-            } elseif ($healthCheckElement !== null && $time - $lastHealthCheck >= 3_000) {
+            } else {
+                foreach ($elements['buttons'] as $button) {
+                    $rawValue = $this->readElementValue($device, $button['element']);
+
+                    if ($rawValue === null) {
+                        continue;
+                    }
+
+                    $buttonNumber = $button['button'];
+
+                    if (!isset($activeLowButtons[$buttonNumber])) {
+                        $activeLowButtons[$buttonNumber] = $rawValue === 1;
+                    }
+
+                    $value = $this->normalizedButtonValue(
+                        $rawValue,
+                        $activeLowButtons[$buttonNumber],
+                    );
+                    $latestButtons[$buttonNumber] = $this->buttonSnapshot(
+                        $button,
+                        $rawValue,
+                        $value,
+                        $activeLowButtons[$buttonNumber],
+                    );
+
+                    if (($previousButtons[$buttonNumber] ?? null) !== $value) {
+                        $previousButtons[$buttonNumber] = $value;
+
+                        if ($this->dumpRawHid) {
+                            $this->dumpButtonEvent(
+                                'hid_button_change',
+                                $button,
+                                $rawValue,
+                                $value,
+                                $activeLowButtons[$buttonNumber],
+                                $time,
+                            );
+                        }
+
+                        $this->mapper?->handleButton($buttonNumber, $value, $time);
+                    }
+                }
+
+                foreach ($elements['axes'] as $axis) {
+                    $rawValue = $this->readElementValue($device, $axis['element']);
+
+                    if ($rawValue === null) {
+                        continue;
+                    }
+
+                    $axisNumber = $axis['axis'];
+                    $value = $this->scaledAxisValue($rawValue);
+                    $latestAxes[$axisNumber] = $this->axisSnapshot($axis, $rawValue, $value);
+
+                    if (($previousAxes[$axisNumber] ?? null) !== $value) {
+                        $previousAxes[$axisNumber] = $value;
+
+                        if ($this->dumpRawHid) {
+                            $this->dumpAxisEvent('hid_axis_change', $axis, $rawValue, $value, $time);
+                        }
+
+                        $this->mapper?->handleAxis($axisNumber, $value, $time);
+                    }
+                }
+            }
+
+            if ($healthCheckElement !== null && $time - $lastHealthCheck >= 3_000) {
                 if (!$this->isDeviceAlive($device, $healthCheckElement)) {
                     return;
                 }
