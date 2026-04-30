@@ -2,13 +2,18 @@
 
 declare(strict_types=1);
 
-namespace KeyboardManiaInputToVirtualMidi;
+namespace KeyboardManiaInputToVirtualMidi\Application;
 
+use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
+use KeyboardManiaInputToVirtualMidi\Input\HidInputToVirtualMidi;
+use KeyboardManiaInputToVirtualMidi\Output\CompositeEventOutput;
+use KeyboardManiaInputToVirtualMidi\Output\CoreMidiOutput;
+use KeyboardManiaInputToVirtualMidi\Output\JsonEventOutput;
 use InvalidArgumentException;
 use JsonException;
 use RuntimeException;
 
-final readonly class ConsoleApplication
+readonly class ConsoleApplication
 {
     private const int DEFAULT_VENDOR_ID = 0x0507;
     private const int DEFAULT_PRODUCT_ID = 0x0010;

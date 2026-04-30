@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
-namespace KeyboardManiaInputToVirtualMidi;
+namespace KeyboardManiaInputToVirtualMidi\Output;
 
-final class JsonEventOutput implements ControllerEventOutput
+use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
+
+class JsonEventOutput implements ControllerEventOutput
 {
     public function emit(array $payload): void
     {

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace KeyboardManiaInputToVirtualMidi;
+namespace KeyboardManiaInputToVirtualMidi\Contract;
 
 interface ControllerEventOutput
 {

@@ -22,6 +22,18 @@ macOS で HID input を読み取る場合は、PHP の FFI extension が必要�
 composer install
 ```
 
+## Structure
+
+`src/Application` は CLI の引数処理と各部品の組み立てを担当します。
+
+`src/Input` は HID device の検出、IOHID element の読み取り、raw HID dump を担当します。
+
+`src/Mapping` は HID の button/axis event を note/control event に変換します。鍵盤割り当ては `config/keymap.json` で調整します。
+
+`src/Output` は変換後の event を JSON または CoreMIDI に出力します。
+
+`src/Contract` には output 実装が満たす interface を置いています。
+
 ## Usage
 
 デフォルトでは `0x0507:0x0010` の HID device を読み取り、`KeyboardMania Virtual MIDI` という CoreMIDI source を作ります。

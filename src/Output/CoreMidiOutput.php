@@ -2,9 +2,10 @@
 
 declare(strict_types=1);
 
-namespace KeyboardManiaInputToVirtualMidi;
+namespace KeyboardManiaInputToVirtualMidi\Output;
 
 use FFI;
+use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
 use RuntimeException;
 use Throwable;
 

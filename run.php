@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use KeyboardManiaInputToVirtualMidi\ConsoleApplication;
+use KeyboardManiaInputToVirtualMidi\Application\ConsoleApplication;
 
 require __DIR__ . '/vendor/autoload.php';
 

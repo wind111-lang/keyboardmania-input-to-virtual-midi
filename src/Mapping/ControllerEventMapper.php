@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
-namespace KeyboardManiaInputToVirtualMidi;
+namespace KeyboardManiaInputToVirtualMidi\Mapping;
 
-final class ControllerEventMapper
+use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
+use KeyboardManiaInputToVirtualMidi\Output\JsonEventOutput;
+
+class ControllerEventMapper
 {
     private readonly array $keyMap;
 
@@ -19,8 +22,7 @@ final class ControllerEventMapper
     public function __construct(
         array $config,
         private readonly ControllerEventOutput $output = new JsonEventOutput(),
-    )
-    {
+    ) {
         $this->keyMap = $this->normalizeStringMap($config['keys'] ?? []);
         $this->axisMap = $this->normalizeStringMap($config['axes'] ?? []);
         $this->buttonMap = $this->normalizeStringMap($config['buttons'] ?? []);

@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
-namespace KeyboardManiaInputToVirtualMidi;
+namespace KeyboardManiaInputToVirtualMidi\Output;
 
-final readonly class CompositeEventOutput implements ControllerEventOutput
+use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
+
+readonly class CompositeEventOutput implements ControllerEventOutput
 {
     /**
      * @param list<ControllerEventOutput> $outputs

@@ -2,13 +2,16 @@
 
 declare(strict_types=1);
 
-namespace KeyboardManiaInputToVirtualMidi;
+namespace KeyboardManiaInputToVirtualMidi\Input;
 
 use FFI;
+use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
+use KeyboardManiaInputToVirtualMidi\Mapping\ControllerEventMapper;
+use KeyboardManiaInputToVirtualMidi\Output\JsonEventOutput;
 use RuntimeException;
 use Throwable;
 
-final class HidInputToVirtualMidi
+class HidInputToVirtualMidi
 {
     private const int DEVICE_RETRY_MICROSECONDS = 1_000_000;
     private const int POLL_MICROSECONDS = 4_000;
