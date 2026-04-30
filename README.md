@@ -8,9 +8,9 @@ GarageBand、MainStage、Logic Pro、REAPER など、CoreMIDI 入力を扱える
 
 このプロジェクトの利用には Keyboardmania 専用コントローラーが必要です。
 
-`config/keymap.json` の割り当てに合わせられる USB HID ゲームコントローラーであれば動作する可能性はあります。ただし、このリポジトリは Keyboardmania 専用コントローラーでの利用を目的としているため、それ以外のコントローラーでの利用は目的外です。
+製造元が `KONAMI` として認識される Keyboardmania 専用コントローラーのみを対象にしています。
 
-指定した input device がまだ存在しない場合、入力読み取りはデバイスが認識されるまで待機します。
+対象の Keyboardmania 専用コントローラーがまだ認識されていない場合、入力読み取りはデバイスが認識されるまで待機します。
 
 ## Setup
 
@@ -36,7 +36,7 @@ composer install
 
 ## Usage
 
-デフォルトでは `0x0507:0x0010` の HID device を読み取り、`KeyboardMania Virtual MIDI` という CoreMIDI source を作ります。
+製造元が `KONAMI` の HID device を読み取り、`KeyboardMania Virtual MIDI` という固定名の CoreMIDI source を作ります。
 
 ```sh
 php run.php
@@ -72,37 +72,25 @@ php run.php --dump-hid
 php run.php --dump-hid --dump-hid-snapshots
 ```
 
-別の USB vendor/product ID を指定する場合:
+MIDI channel を指定する場合:
 
 ```sh
-php run.php --vendor-id 0x0507 --product-id 0x0010
+php run.php --midi-channel 1
 ```
 
-CoreMIDI source 名や MIDI channel を指定する場合:
-
-```sh
-php run.php --midi-source "KeyboardMania Virtual MIDI" --midi-channel 1
-```
-
-別の keymap を指定する場合:
-
-```sh
-php run.php --config config/keymap.json
-```
-
-起動すると `Press Ctrl+C to stop.` が表示されます。指定した HID device がまだ存在しない場合は、デバイスが認識されるまで待機します。
+起動すると `Press Ctrl+C to stop.` が表示されます。対象の Keyboardmania 専用コントローラーがまだ認識されていない場合は、デバイスが認識されるまで待機します。
 
 音楽アプリ側では MIDI 入力として `KeyboardMania Virtual MIDI` を選択してください。
 
 ## Troubleshooting
 
-VCV Rack Free に `KeyboardMania Virtual MIDI` が見えているのに音が鳴らない場合は、まず次のコマンドで CoreMIDI だけを確認してください。
+GarageBand で音が鳴らない場合は、まず次のコマンドで CoreMIDI だけを確認してください。
 
 ```sh
 php run.php --test-note C4
 ```
 
-VCV Rack 側では `MIDI-CV` module の Driver を `Core MIDI`、Device を `KeyboardMania Virtual MIDI`、Channel を `1` または `All` にします。`V/OCT` を oscillator に、`GATE` を envelope や VCA に接続した状態でテストノートが鳴れば、CoreMIDI と VCV Rack の設定は通っています。
+GarageBand 側ではソフトウェア音源トラックを作成し、そのトラックを選択した状態にします。`php run.php --test-note C4` で音が鳴れば、CoreMIDI と GarageBand の設定は通っています。
 
 テストノートは鳴るのに Keyboardmania controller で鳴らない場合は、次のコマンドで HID input が `note_down` / `note_up` に変換されているか確認してください。
 

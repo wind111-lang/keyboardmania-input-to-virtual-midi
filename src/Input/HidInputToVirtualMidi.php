@@ -17,7 +17,7 @@ class HidInputToVirtualMidi
     private const int POLL_MICROSECONDS = 4_000;
     private const int DUMP_SNAPSHOT_MILLISECONDS = 1_000;
     private const int CF_STRING_ENCODING_UTF8 = 0x08000100;
-    private const int CF_NUMBER_INT_TYPE = 9;
+    private const string MANUFACTURER = 'KONAMI';
     private const int HID_PAGE_GENERIC_DESKTOP = 0x01;
     private const int HID_PAGE_BUTTON = 0x09;
     private const int HID_USAGE_X = 0x30;
@@ -38,8 +38,6 @@ class HidInputToVirtualMidi
     private array $retainedCoreFoundationValues = [];
 
     public function __construct(
-        private readonly int $vendorId,
-        private readonly int $productId,
         array $config,
         ControllerEventOutput $output = new JsonEventOutput(),
         private readonly bool $dumpRawHid = false,
@@ -64,9 +62,8 @@ class HidInputToVirtualMidi
             fwrite(
                 STDERR,
                 sprintf(
-                    "Reading HID input: vendor 0x%04x, product 0x%04x (%d buttons, %d axes)\n",
-                    $this->vendorId,
-                    $this->productId,
+                    "Reading HID input: manufacturer %s (%d buttons, %d axes)\n",
+                    self::MANUFACTURER,
                     count($elements['buttons']),
                     count($elements['axes']),
                 ),
@@ -98,7 +95,6 @@ typedef const void * CFTypeRef;
 typedef const struct __CFString * CFStringRef;
 typedef const struct __CFDictionary * CFDictionaryRef;
 typedef struct __CFDictionary * CFMutableDictionaryRef;
-typedef const struct __CFNumber * CFNumberRef;
 typedef const struct __CFSet * CFSetRef;
 typedef const struct __CFArray * CFArrayRef;
 typedef const struct __IOHIDManager * IOHIDManagerRef;
@@ -113,7 +109,6 @@ typedef double CFTimeInterval;
 CFStringRef CFStringCreateWithCString(const void *alloc, const char *cStr, unsigned int encoding);
 CFMutableDictionaryRef CFDictionaryCreateMutable(const void *allocator, long capacity, const void *keyCallBacks, const void *valueCallBacks);
 void CFDictionarySetValue(CFMutableDictionaryRef theDict, const void *key, const void *value);
-CFNumberRef CFNumberCreate(const void *allocator, int theType, const void *valuePtr);
 void CFRelease(CFTypeRef cf);
 long CFSetGetCount(CFSetRef theSet);
 void CFSetGetValues(CFSetRef theSet, const void **values);
@@ -177,9 +172,8 @@ CDEF;
                 fwrite(
                     STDERR,
                     sprintf(
-                        "Waiting for HID device: vendor 0x%04x, product 0x%04x\n",
-                        $this->vendorId,
-                        $this->productId,
+                        "Waiting for HID device: manufacturer %s\n",
+                        self::MANUFACTURER,
                     ),
                 );
                 $reportedWaiting = true;
@@ -192,43 +186,24 @@ CDEF;
     private function createMatchingDictionary(): mixed
     {
         $dictionary = $this->ffi->CFDictionaryCreateMutable(null, 0, null, null);
-        $vendorKey = $this->ffi->CFStringCreateWithCString(
+        $manufacturerKey = $this->ffi->CFStringCreateWithCString(
             null,
-            'VendorID',
+            'Manufacturer',
             self::CF_STRING_ENCODING_UTF8,
         );
-        $productKey = $this->ffi->CFStringCreateWithCString(
+        $manufacturerValue = $this->ffi->CFStringCreateWithCString(
             null,
-            'ProductID',
+            self::MANUFACTURER,
             self::CF_STRING_ENCODING_UTF8,
-        );
-        $vendorBuffer = $this->ffi->new('int[1]');
-        $vendorBuffer[0] = $this->vendorId;
-        $productBuffer = $this->ffi->new('int[1]');
-        $productBuffer[0] = $this->productId;
-        $vendorValue = $this->ffi->CFNumberCreate(
-            null,
-            self::CF_NUMBER_INT_TYPE,
-            $vendorBuffer,
-        );
-        $productValue = $this->ffi->CFNumberCreate(
-            null,
-            self::CF_NUMBER_INT_TYPE,
-            $productBuffer,
         );
 
-        $this->ffi->CFDictionarySetValue($dictionary, $vendorKey, $vendorValue);
-        $this->ffi->CFDictionarySetValue($dictionary, $productKey, $productValue);
+        $this->ffi->CFDictionarySetValue($dictionary, $manufacturerKey, $manufacturerValue);
 
         // Keep CF objects alive because the dictionary uses null callbacks.
         $this->retainedCoreFoundationValues = [
             $dictionary,
-            $vendorKey,
-            $productKey,
-            $vendorValue,
-            $productValue,
-            $vendorBuffer,
-            $productBuffer,
+            $manufacturerKey,
+            $manufacturerValue,
         ];
 
         return $dictionary;

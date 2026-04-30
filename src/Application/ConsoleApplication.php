@@ -15,9 +15,8 @@ use RuntimeException;
 
 readonly class ConsoleApplication
 {
-    private const int DEFAULT_VENDOR_ID = 0x0507;
-    private const int DEFAULT_PRODUCT_ID = 0x0010;
-    private const string DEFAULT_MIDI_SOURCE = 'KeyboardMania Virtual MIDI';
+    private const string MIDI_SOURCE = 'KeyboardMania Virtual MIDI';
+    private const string KEYMAP_PATH = '/config/keymap.json';
 
     public function __construct(private string $projectRoot)
     {
@@ -40,7 +39,7 @@ readonly class ConsoleApplication
                 $this->runMidiTest($options);
             }
 
-            $config = $this->loadConfig($options['config']);
+            $config = $this->loadConfig();
 
             if ($options['dump_hid']) {
                 $this->runHidDump($options, $config);
@@ -57,11 +56,7 @@ readonly class ConsoleApplication
     /**
      * @param list<string> $argv
      * @return array{
-     *     config: string,
-     *     vendor_id: int,
-     *     product_id: int,
      *     output: string,
-     *     midi_source: string,
      *     midi_channel: int,
      *     test_note: string|null,
      *     dump_hid: bool,
@@ -72,11 +67,7 @@ readonly class ConsoleApplication
     private function parseArguments(array $argv): array
     {
         $options = [
-            'config' => $this->projectRoot . '/config/keymap.json',
-            'vendor_id' => self::DEFAULT_VENDOR_ID,
-            'product_id' => self::DEFAULT_PRODUCT_ID,
             'output' => 'midi',
-            'midi_source' => self::DEFAULT_MIDI_SOURCE,
             'midi_channel' => 1,
             'test_note' => null,
             'dump_hid' => false,
@@ -102,58 +93,6 @@ readonly class ConsoleApplication
             if (str_starts_with($argument, '--output=')) {
                 $options['output'] = $this->outputMode(
                     substr($argument, strlen('--output=')),
-                );
-                continue;
-            }
-
-            if ($argument === '-c' || $argument === '--config') {
-                $options['config'] = $this->readOptionValue($argv, $index, $argument);
-                continue;
-            }
-
-            if (str_starts_with($argument, '--config=')) {
-                $options['config'] = $this->nonEmptyOptionValue(
-                    substr($argument, strlen('--config=')),
-                    '--config',
-                );
-                continue;
-            }
-
-            if ($argument === '--vendor-id') {
-                $options['vendor_id'] = $this->readIntegerOptionValue($argv, $index, $argument);
-                continue;
-            }
-
-            if (str_starts_with($argument, '--vendor-id=')) {
-                $options['vendor_id'] = $this->integerOptionValue(
-                    substr($argument, strlen('--vendor-id=')),
-                    '--vendor-id',
-                );
-                continue;
-            }
-
-            if ($argument === '--product-id') {
-                $options['product_id'] = $this->readIntegerOptionValue($argv, $index, $argument);
-                continue;
-            }
-
-            if (str_starts_with($argument, '--product-id=')) {
-                $options['product_id'] = $this->integerOptionValue(
-                    substr($argument, strlen('--product-id=')),
-                    '--product-id',
-                );
-                continue;
-            }
-
-            if ($argument === '--midi-source') {
-                $options['midi_source'] = $this->readOptionValue($argv, $index, $argument);
-                continue;
-            }
-
-            if (str_starts_with($argument, '--midi-source=')) {
-                $options['midi_source'] = $this->nonEmptyOptionValue(
-                    substr($argument, strlen('--midi-source=')),
-                    '--midi-source',
                 );
                 continue;
             }
@@ -210,10 +149,7 @@ readonly class ConsoleApplication
 
     /**
      * @param array{
-     *     vendor_id: int,
-     *     product_id: int,
      *     output: string,
-     *     midi_source: string,
      *     midi_channel: int,
      *     dump_hid: bool,
      *     dump_hid_snapshots: bool
@@ -223,8 +159,6 @@ readonly class ConsoleApplication
     private function runInput(array $options, array $config): never
     {
         $runner = new HidInputToVirtualMidi(
-            $options['vendor_id'],
-            $options['product_id'],
             $config,
             $this->createOutput($options),
             $options['dump_hid'],
@@ -236,8 +170,6 @@ readonly class ConsoleApplication
 
     /**
      * @param array{
-     *     vendor_id: int,
-     *     product_id: int,
      *     dump_hid: bool,
      *     dump_hid_snapshots: bool
      * } $options
@@ -246,8 +178,6 @@ readonly class ConsoleApplication
     private function runHidDump(array $options, array $config): never
     {
         $runner = new HidInputToVirtualMidi(
-            $options['vendor_id'],
-            $options['product_id'],
             $config,
             new JsonEventOutput(),
             $options['dump_hid'],
@@ -258,12 +188,12 @@ readonly class ConsoleApplication
     }
 
     /**
-     * @param array{midi_source: string, midi_channel: int, test_note: string} $options
+     * @param array{midi_channel: int, test_note: string} $options
      */
     private function runMidiTest(array $options): never
     {
         $output = new CoreMidiOutput(
-            $options['midi_source'],
+            self::MIDI_SOURCE,
             $options['midi_channel'],
         );
         $note = $options['test_note'];
@@ -297,7 +227,7 @@ readonly class ConsoleApplication
     }
 
     /**
-     * @param array{output: string, midi_source: string, midi_channel: int} $options
+     * @param array{output: string, midi_channel: int} $options
      */
     private function createOutput(array $options): ControllerEventOutput
     {
@@ -306,13 +236,13 @@ readonly class ConsoleApplication
         return match ($output) {
             'json' => new JsonEventOutput(),
             'midi' => new CoreMidiOutput(
-                $options['midi_source'],
+                self::MIDI_SOURCE,
                 $options['midi_channel'],
             ),
             'both' => new CompositeEventOutput([
                 new JsonEventOutput(),
                 new CoreMidiOutput(
-                    $options['midi_source'],
+                    self::MIDI_SOURCE,
                     $options['midi_channel'],
                 ),
             ]),
@@ -437,8 +367,10 @@ readonly class ConsoleApplication
     /**
      * @return array<mixed>
      */
-    private function loadConfig(string $configPath): array
+    private function loadConfig(): array
     {
+        $configPath = $this->projectRoot . self::KEYMAP_PATH;
+
         if (!is_file($configPath)) {
             throw new RuntimeException("Keymap config not found: {$configPath}");
         }
@@ -468,20 +400,14 @@ readonly class ConsoleApplication
 
     private function usage(): string
     {
-        $defaultConfig = $this->projectRoot . '/config/keymap.json';
-
         return <<<USAGE
 Usage:
-  php run.php [--output json|midi|both] [--config PATH]
+  php run.php [--output json|midi|both]
   php run.php --test-note NOTE
   php run.php --dump-hid [--dump-hid-snapshots]
 
 Options:
   -o, --output MODE   Output: json, midi, or both (default: midi)
-  -c, --config PATH   Keymap JSON file (default: {$defaultConfig})
-      --vendor-id ID  HID USB vendor ID (default: 0x0507)
-      --product-id ID HID USB product ID (default: 0x0010)
-      --midi-source N CoreMIDI source name (default: KeyboardMania Virtual MIDI)
       --midi-channel N MIDI channel, 1-16 (default: 1)
       --test-note N   Send a repeating CoreMIDI test note without reading HID input
       --dump-hid      Print raw HID initial values and changes without MIDI output
@@ -497,7 +423,7 @@ Examples:
   php run.php --dump-hid
   php run.php --dump-hid --dump-hid-snapshots
 
-The command waits if the selected HID device does not exist yet.
+The command waits until a KONAMI HID device is detected.
 
 USAGE;
     }
