@@ -486,7 +486,7 @@ CDEF;
                             );
                         }
 
-                        $this->mapper->handleButton($buttonNumber, $value, $time);
+                        $this->mapper?->handleButton($buttonNumber, $value, $time);
                     }
                 }
 
@@ -503,7 +503,7 @@ CDEF;
                             $this->dumpAxisEvent('hid_axis_change', $axis, $rawValue, $value, $time);
                         }
 
-                        $this->mapper->handleAxis($axisNumber, $value, $time);
+                        $this->mapper?->handleAxis($axisNumber, $value, $time);
                     }
                 }
 

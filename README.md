@@ -48,7 +48,7 @@ php run.php
 composer start
 ```
 
-CoreMIDI を出しながら変換後の event も確認したい場合:
+CoreMIDI を出しながら HID raw event と変換後の event を確認したい場合:
 
 ```sh
 php run.php --debug-events
@@ -92,7 +92,7 @@ php run.php --test-note C4
 
 GarageBand 側ではソフトウェア音源トラックを作成し、そのトラックを選択した状態にします。`php run.php --test-note C4` で音が鳴れば、CoreMIDI と GarageBand の設定は通っています。
 
-テストノートは鳴るのに Keyboardmania controller で鳴らない場合は、次のコマンドで HID input が `note_down` / `note_up` に変換されているか確認してください。MIDI 送信は通常どおり行い、同じ CoreMIDI output が debug event も出します。
+テストノートは鳴るのに Keyboardmania controller で鳴らない場合は、次のコマンドで HID input が変化しているか、さらに `note_down` / `note_up` に変換されているか確認してください。MIDI 送信は通常どおり行います。
 
 ```sh
 php run.php --debug-events

@@ -150,7 +150,7 @@ readonly class ConsoleApplication
         $runner = new HidInputToVirtualMidi(
             $config,
             $this->createOutput($options),
-            $options['dump_hid'],
+            $options['dump_hid'] || $options['debug_events'],
             $options['dump_hid_snapshots'],
         );
 
@@ -374,7 +374,7 @@ Usage:
 
 Options:
       --midi-channel N MIDI channel, 1-16 (default: 1)
-      --debug-events Print mapped controller events while sending CoreMIDI
+      --debug-events Print HID and mapped events while sending CoreMIDI
       --test-note N   Send a repeating CoreMIDI test note without reading HID input
       --dump-hid      Print raw HID initial values and changes without MIDI output
       --dump-hid-snapshots
