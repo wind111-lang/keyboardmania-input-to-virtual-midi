@@ -1,0 +1,7 @@
+parameters:
+    level: 6
+    paths:
+        - run.php
+        - src
+    stubFiles:
+        - stubs/ffi.stub

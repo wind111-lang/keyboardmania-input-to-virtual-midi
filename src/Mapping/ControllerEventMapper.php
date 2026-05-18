@@ -8,16 +8,31 @@ use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
 
 class ControllerEventMapper
 {
+    /**
+     * @var array<string, string>
+     */
     private readonly array $keyMap;
 
+    /**
+     * @var array<string, string>
+     */
     private readonly array $axisMap;
 
+    /**
+     * @var array<string, string>
+     */
     private readonly array $buttonMap;
 
+    /**
+     * @var array<int, string>
+     */
     private array $pressedNotes = [];
 
     private int $volume = 100;
 
+    /**
+     * @param array<string, mixed> $config
+     */
     public function __construct(
         array $config,
         private readonly ControllerEventOutput $output,
@@ -178,6 +193,9 @@ class ControllerEventMapper
         return (int) round($normalized * 127);
     }
 
+    /**
+     * @return array<string, string>
+     */
     private function normalizeStringMap(mixed $map): array
     {
         if (!is_array($map)) {
@@ -197,6 +215,9 @@ class ControllerEventMapper
         return $result;
     }
 
+    /**
+     * @param array<string, mixed> $payload
+     */
     private function emit(array $payload): void
     {
         $this->output->emit($payload);

@@ -36,8 +36,14 @@ class HidInputToVirtualMidi
 
     private mixed $inputQueue = null;
 
+    /**
+     * @var list<mixed>
+     */
     private array $retainedCoreFoundationValues = [];
 
+    /**
+     * @param array<string, mixed> $config
+     */
     public function __construct(
         array $config,
         ?ControllerEventOutput $output,
@@ -46,6 +52,18 @@ class HidInputToVirtualMidi
     ) {
         $this->mapper = $output === null ? null : new ControllerEventMapper($config, $output);
         $this->ffi = $this->createFfi();
+    }
+
+    public function __destruct()
+    {
+        if ($this->inputQueue !== null) {
+            $this->ffi->IOHIDQueueStop($this->inputQueue);
+            $this->inputQueue = null;
+        }
+
+        if ($this->retainedCoreFoundationValues !== []) {
+            $this->retainedCoreFoundationValues = [];
+        }
     }
 
     public function run(): never
@@ -270,8 +288,17 @@ CDEF;
             ];
         }
 
+        /**
+         * @var array<int, array{button: int, usage: int, cookie: int, element: mixed}> $buttonsByNumber
+         */
         $buttonsByNumber = [];
+        /**
+         * @var list<array{usage: int, cookie: int, element: mixed}> $extraButtonElements
+         */
         $extraButtonElements = [];
+        /**
+         * @var list<array{axis: int, usage: int, cookie: int, element: mixed}> $axes
+         */
         $axes = [];
         $elementCount = $this->ffi->CFArrayGetCount($this->elementArray);
 
@@ -445,7 +472,7 @@ CDEF;
 
         while (true) {
             $time = $this->timeMilliseconds();
-            $valueRef = $this->ffi->IOHIDQueueCopyNextValueWithTimeout($queue, 0.01);
+            $valueRef = $this->ffi->IOHIDQueueCopyNextValueWithTimeout($queue, 0.10);
 
             if ($valueRef !== null) {
                 $lastHealthCheck = $time;
@@ -508,73 +535,7 @@ CDEF;
                 }
 
                 $this->ffi->CFRelease($valueRef);
-            } else {
-                foreach ($elements['buttons'] as $button) {
-                    $rawValue = $this->readElementValue($device, $button['element']);
-
-                    if ($rawValue === null) {
-                        continue;
-                    }
-
-                    $buttonNumber = $button['button'];
-
-                    if (!isset($activeLowButtons[$buttonNumber])) {
-                        $activeLowButtons[$buttonNumber] = $rawValue === 1;
-                    }
-
-                    $value = $this->normalizedButtonValue(
-                        $rawValue,
-                        $activeLowButtons[$buttonNumber],
-                    );
-                    $latestButtons[$buttonNumber] = $this->buttonSnapshot(
-                        $button,
-                        $rawValue,
-                        $value,
-                        $activeLowButtons[$buttonNumber],
-                    );
-
-                    if (($previousButtons[$buttonNumber] ?? null) !== $value) {
-                        $previousButtons[$buttonNumber] = $value;
-
-                        if ($this->dumpRawHid) {
-                            $this->dumpButtonEvent(
-                                'hid_button_change',
-                                $button,
-                                $rawValue,
-                                $value,
-                                $activeLowButtons[$buttonNumber],
-                                $time,
-                            );
-                        }
-
-                        $this->mapper?->handleButton($buttonNumber, $value, $time);
-                    }
-                }
-
-                foreach ($elements['axes'] as $axis) {
-                    $rawValue = $this->readElementValue($device, $axis['element']);
-
-                    if ($rawValue === null) {
-                        continue;
-                    }
-
-                    $axisNumber = $axis['axis'];
-                    $value = $this->scaledAxisValue($rawValue);
-                    $latestAxes[$axisNumber] = $this->axisSnapshot($axis, $rawValue, $value);
-
-                    if (($previousAxes[$axisNumber] ?? null) !== $value) {
-                        $previousAxes[$axisNumber] = $value;
-
-                        if ($this->dumpRawHid) {
-                            $this->dumpAxisEvent('hid_axis_change', $axis, $rawValue, $value, $time);
-                        }
-
-                        $this->mapper?->handleAxis($axisNumber, $value, $time);
-                    }
-                }
-            }
-
-            if ($healthCheckElement !== null && $time - $lastHealthCheck >= 3_000) {
+            } elseif ($healthCheckElement !== null && $time - $lastHealthCheck >= 3_000) {
                 if (!$this->isDeviceAlive($device, $healthCheckElement)) {
                     return;
                 }
@@ -825,7 +786,7 @@ CDEF;
     }
 
     /**
-     * @param array<mixed> $payload
+     * @param array<string, mixed> $payload
      */
     private function dumpEvent(array $payload): void
     {

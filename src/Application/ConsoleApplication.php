@@ -143,7 +143,7 @@ readonly class ConsoleApplication
      *     dump_hid: bool,
      *     dump_hid_snapshots: bool
      * } $options
-     * @param array<mixed> $config
+     * @param array<string, mixed> $config
      */
     private function runInput(array $options, array $config): never
     {
@@ -162,7 +162,7 @@ readonly class ConsoleApplication
      *     dump_hid: bool,
      *     dump_hid_snapshots: bool
      * } $options
-     * @param array<mixed> $config
+     * @param array<string, mixed> $config
      */
     private function runHidDump(array $options, array $config): never
     {
@@ -289,6 +289,9 @@ readonly class ConsoleApplication
             'G' => 7,
             'A' => 9,
             'B' => 11,
+            default => throw new InvalidArgumentException(
+                "Invalid value for {$option}: {$value}. Expected a note like C4 or F#3.",
+            ),
         };
         $accidental = match ($matches[2]) {
             '#' => 1,
@@ -331,7 +334,7 @@ readonly class ConsoleApplication
     }
 
     /**
-     * @return array<mixed>
+     * @return array<string, mixed>
      */
     private function loadConfig(): array
     {

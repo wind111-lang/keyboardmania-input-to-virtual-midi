@@ -1,0 +1,39 @@
+<?php
+
+/**
+ * @method mixed CFStringCreateWithCString(mixed $alloc, string $cStr, int $encoding)
+ * @method int MIDIClientCreate(mixed $name, mixed $notifyProc, mixed $notifyRefCon, mixed $outClient)
+ * @method int MIDISourceCreate(mixed $client, mixed $name, mixed $outSrc)
+ * @method mixed MIDIPacketListInit(mixed $pktlist)
+ * @method mixed MIDIPacketListAdd(mixed $pktlist, int $listSize, mixed $curPacket, int $time, int $nData, mixed $data)
+ * @method int MIDIReceived(mixed $src, mixed $pktlist)
+ * @method mixed CFDictionaryCreateMutable(mixed $allocator, int $capacity, mixed $keyCallBacks, mixed $valueCallBacks)
+ * @method void CFDictionarySetValue(mixed $theDict, mixed $key, mixed $value)
+ * @method mixed CFNumberCreate(mixed $allocator, int $theType, mixed $valuePtr)
+ * @method void CFRelease(mixed $cf)
+ * @method int CFSetGetCount(mixed $theSet)
+ * @method void CFSetGetValues(mixed $theSet, mixed $values)
+ * @method int CFArrayGetCount(mixed $theArray)
+ * @method mixed CFArrayGetValueAtIndex(mixed $theArray, int $idx)
+ * @method mixed IOHIDManagerCreate(mixed $allocator, int $options)
+ * @method void IOHIDManagerSetDeviceMatching(mixed $manager, mixed $matching)
+ * @method int IOHIDManagerOpen(mixed $manager, int $options)
+ * @method mixed IOHIDManagerCopyDevices(mixed $manager)
+ * @method int IOHIDDeviceOpen(mixed $device, int $options)
+ * @method mixed IOHIDDeviceCopyMatchingElements(mixed $device, mixed $matching, int $options)
+ * @method int IOHIDElementGetUsagePage(mixed $element)
+ * @method int IOHIDElementGetUsage(mixed $element)
+ * @method int IOHIDElementGetCookie(mixed $element)
+ * @method int IOHIDElementGetReportSize(mixed $element)
+ * @method int IOHIDDeviceGetValue(mixed $device, mixed $element, mixed $pValue)
+ * @method mixed IOHIDQueueCreate(mixed $allocator, mixed $device, int $depth, int $options)
+ * @method void IOHIDQueueAddElement(mixed $queue, mixed $element)
+ * @method void IOHIDQueueStart(mixed $queue)
+ * @method void IOHIDQueueStop(mixed $queue)
+ * @method mixed IOHIDQueueCopyNextValueWithTimeout(mixed $queue, float $timeout)
+ * @method mixed IOHIDValueGetElement(mixed $value)
+ * @method int IOHIDValueGetIntegerValue(mixed $value)
+ */
+class FFI
+{
+}

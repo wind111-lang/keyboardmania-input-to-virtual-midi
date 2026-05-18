@@ -7,7 +7,7 @@ namespace KeyboardManiaInputToVirtualMidi\Contract;
 interface ControllerEventOutput
 {
     /**
-     * @param array<mixed> $payload
+     * @param array<string, mixed> $payload
      */
     public function emit(array $payload): void;
 }

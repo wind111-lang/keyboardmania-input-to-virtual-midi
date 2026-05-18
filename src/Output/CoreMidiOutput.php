@@ -21,8 +21,6 @@ final class CoreMidiOutput implements ControllerEventOutput
 
     private readonly int $midiChannel;
 
-    private int $client = 0;
-
     private int $source = 0;
 
     /**
@@ -60,6 +58,13 @@ final class CoreMidiOutput implements ControllerEventOutput
         register_shutdown_function($this->panic(...));
 
         fwrite(STDERR, "Created CoreMIDI source: {$this->sourceName}\n");
+    }
+
+    public function __destruct()
+    {
+        if ($this->retainedCoreFoundationValues !== []) {
+            $this->retainedCoreFoundationValues = [];
+        }
     }
 
     public function emit(array $payload): void
@@ -177,7 +182,6 @@ CDEF;
             );
         }
 
-        $this->client = $client[0];
         $this->source = $source[0];
         $this->retainedCoreFoundationValues = [$name, $client, $source];
     }
@@ -249,7 +253,12 @@ CDEF;
             'G' => 7,
             'A' => 9,
             'B' => 11,
+            default => null,
         };
+
+        if ($base === null) {
+            return null;
+        }
         $accidental = match ($matches[2]) {
             '#' => 1,
             'b' => -1,
@@ -289,7 +298,7 @@ CDEF;
     }
 
     /**
-     * @param array<mixed> $payload
+     * @param array<string, mixed> $payload
      */
     private function dumpEvent(array $payload): void
     {
