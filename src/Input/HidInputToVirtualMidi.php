@@ -49,6 +49,8 @@ class HidInputToVirtualMidi
         ?ControllerEventOutput $output,
         private readonly bool $dumpRawHid = false,
         private readonly bool $dumpRawHidSnapshots = false,
+        private readonly ?int $vendorId = null,
+        private readonly int $productId = self::PRODUCT_ID,
     ) {
         $this->mapper = $output === null ? null : new ControllerEventMapper($config, $output);
         $this->ffi = $this->createFfi();
@@ -81,9 +83,8 @@ class HidInputToVirtualMidi
             fwrite(
                 STDERR,
                 sprintf(
-                    "Reading HID input: KeyboardMania controller %s / Product ID 0x%04x (%d buttons, %d axes)\n",
-                    self::MANUFACTURER,
-                    self::PRODUCT_ID,
+                    "Reading HID input: KeyboardMania controller %s (%d buttons, %d axes)\n",
+                    $this->deviceDescription(),
                     count($elements['buttons']),
                     count($elements['axes']),
                 ),
@@ -172,11 +173,7 @@ CDEF;
 
         while (true) {
             $this->manager = $this->ffi->IOHIDManagerCreate(null, 0);
-            // 製造元名とProduct IDで対象デバイスを絞り込む。
-            $matching = $this->createMatchingDictionary([
-                'Manufacturer' => self::MANUFACTURER,
-                'ProductID' => self::PRODUCT_ID,
-            ]);
+            $matching = $this->createMatchingDictionary();
             $this->ffi->IOHIDManagerSetDeviceMatching($this->manager, $matching);
 
             $openResult = $this->ffi->IOHIDManagerOpen($this->manager, 0);
@@ -198,9 +195,8 @@ CDEF;
                 fwrite(
                     STDERR,
                     sprintf(
-                        "Waiting for KeyboardMania controller: %s / Product ID 0x%04x\n",
-                        self::MANUFACTURER,
-                        self::PRODUCT_ID,
+                        "Waiting for KeyboardMania controller: %s\n",
+                        $this->deviceDescription(),
                     ),
                 );
                 $reportedWaiting = true;
@@ -210,31 +206,49 @@ CDEF;
         }
     }
 
-    /**
-     * @param array<string, string|int> $criteria
-     */
-    private function createMatchingDictionary(array $criteria): mixed
+    private function deviceDescription(): string
+    {
+        $manufacturer = $this->vendorId === null
+            ? self::MANUFACTURER
+            : sprintf('Vendor ID 0x%04x', $this->vendorId);
+
+        return sprintf('%s / Product ID 0x%04x', $manufacturer, $this->productId);
+    }
+
+    private function createMatchingDictionary(): mixed
     {
         $dictionary = $this->ffi->CFDictionaryCreateMutable(null, 0, null, null);
-        // Keep CF objects alive because the dictionary uses null callbacks.
-        $this->retainedCoreFoundationValues = [$dictionary];
 
-        foreach ($criteria as $name => $value) {
-            $key = $this->ffi->CFStringCreateWithCString(null, $name, self::CF_STRING_ENCODING_UTF8);
-
-            if (is_string($value)) {
-                $cfValue = $this->ffi->CFStringCreateWithCString(null, $value, self::CF_STRING_ENCODING_UTF8);
-            } else {
-                $buffer = $this->ffi->new('int[1]');
-                $buffer[0] = $value;
-                $cfValue = $this->ffi->CFNumberCreate(null, self::CF_NUMBER_INT_TYPE, $buffer);
-                $this->retainedCoreFoundationValues[] = $buffer;
-            }
-
-            $this->ffi->CFDictionarySetValue($dictionary, $key, $cfValue);
-            $this->retainedCoreFoundationValues[] = $key;
-            $this->retainedCoreFoundationValues[] = $cfValue;
+        if ($this->vendorId === null) {
+            // 製造元名はCFStringとして指定する。
+            $manufacturerKey = $this->ffi->CFStringCreateWithCString(null, 'Manufacturer', self::CF_STRING_ENCODING_UTF8);
+            $manufacturerValue = $this->ffi->CFStringCreateWithCString(null, self::MANUFACTURER, self::CF_STRING_ENCODING_UTF8);
+            $this->ffi->CFDictionarySetValue($dictionary, $manufacturerKey, $manufacturerValue);
+            $manufacturerValues = [$manufacturerKey, $manufacturerValue];
+        } else {
+            // --vendor-idを明示した場合は、製造元名の代わりに数値IDで検索する。
+            $vendorKey = $this->ffi->CFStringCreateWithCString(null, 'VendorID', self::CF_STRING_ENCODING_UTF8);
+            $vendorBuffer = $this->ffi->new('int[1]');
+            $vendorBuffer[0] = $this->vendorId;
+            $vendorValue = $this->ffi->CFNumberCreate(null, self::CF_NUMBER_INT_TYPE, $vendorBuffer);
+            $this->ffi->CFDictionarySetValue($dictionary, $vendorKey, $vendorValue);
+            $manufacturerValues = [$vendorKey, $vendorValue, $vendorBuffer];
         }
+
+        $productKey = $this->ffi->CFStringCreateWithCString(null, 'ProductID', self::CF_STRING_ENCODING_UTF8);
+        $productBuffer = $this->ffi->new('int[1]');
+        $productBuffer[0] = $this->productId;
+        $productValue = $this->ffi->CFNumberCreate(null, self::CF_NUMBER_INT_TYPE, $productBuffer);
+        $this->ffi->CFDictionarySetValue($dictionary, $productKey, $productValue);
+
+        // Keep CF objects alive because the dictionary uses null callbacks.
+        $this->retainedCoreFoundationValues = [
+            $dictionary,
+            ...$manufacturerValues,
+            $productKey,
+            $productValue,
+            $productBuffer,
+        ];
 
         return $dictionary;
     }

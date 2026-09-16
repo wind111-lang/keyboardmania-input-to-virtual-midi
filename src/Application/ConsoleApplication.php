@@ -6,7 +6,9 @@ namespace KeyboardManiaInputToVirtualMidi\Application;
 
 use KeyboardManiaInputToVirtualMidi\Contract\ControllerEventOutput;
 use KeyboardManiaInputToVirtualMidi\Input\HidInputToVirtualMidi;
+use KeyboardManiaInputToVirtualMidi\Output\CompositeEventOutput;
 use KeyboardManiaInputToVirtualMidi\Output\CoreMidiOutput;
+use KeyboardManiaInputToVirtualMidi\Output\JsonEventOutput;
 use InvalidArgumentException;
 use JsonException;
 use RuntimeException;
@@ -37,7 +39,7 @@ readonly class ConsoleApplication
                 $this->runMidiTest($options);
             }
 
-            $config = $this->loadConfig();
+            $config = $this->loadConfig($options['config']);
 
             if ($options['dump_hid']) {
                 $this->runHidDump($options, $config);
@@ -54,6 +56,11 @@ readonly class ConsoleApplication
     /**
      * @param list<string> $argv
      * @return array{
+     *     output: 'json'|'midi'|'both',
+     *     config: string,
+     *     vendor_id: int|null,
+     *     product_id: int,
+     *     midi_source: string,
      *     midi_channel: int,
      *     test_note: string|null,
      *     debug_events: bool,
@@ -65,6 +72,11 @@ readonly class ConsoleApplication
     private function parseArguments(array $argv): array
     {
         $options = [
+            'output' => 'midi',
+            'config' => $this->projectRoot . self::KEYMAP_PATH,
+            'vendor_id' => null,
+            'product_id' => 0x0010,
+            'midi_source' => self::MIDI_SOURCE,
             'midi_channel' => 1,
             'test_note' => null,
             'debug_events' => false,
@@ -78,6 +90,47 @@ readonly class ConsoleApplication
 
             if ($argument === '-h' || $argument === '--help') {
                 $options['help'] = true;
+                continue;
+            }
+
+            if ($argument === '-o' || $argument === '--output') {
+                $options['output'] = $this->outputMode($this->readOptionValue($argv, $index, $argument));
+                continue;
+            }
+
+            if (str_starts_with($argument, '--output=')) {
+                $options['output'] = $this->outputMode(substr($argument, strlen('--output=')));
+                continue;
+            }
+
+            if ($argument === '-c' || $argument === '--config') {
+                $options['config'] = $this->readOptionValue($argv, $index, $argument);
+                continue;
+            }
+
+            if (str_starts_with($argument, '--config=')) {
+                $options['config'] = $this->nonEmptyOptionValue(substr($argument, strlen('--config=')), '--config');
+                continue;
+            }
+
+            foreach (['--vendor-id' => 'vendor_id', '--product-id' => 'product_id'] as $option => $key) {
+                if ($argument === $option) {
+                    $options[$key] = $this->readIntegerOptionValue($argv, $index, $option);
+                    continue 2;
+                }
+                if (str_starts_with($argument, $option . '=')) {
+                    $options[$key] = $this->integerOptionValue(substr($argument, strlen($option) + 1), $option);
+                    continue 2;
+                }
+            }
+
+            if ($argument === '--midi-source') {
+                $options['midi_source'] = $this->readOptionValue($argv, $index, $argument);
+                continue;
+            }
+
+            if (str_starts_with($argument, '--midi-source=')) {
+                $options['midi_source'] = $this->nonEmptyOptionValue(substr($argument, strlen('--midi-source=')), '--midi-source');
                 continue;
             }
 
@@ -138,6 +191,10 @@ readonly class ConsoleApplication
 
     /**
      * @param array{
+     *     output: 'json'|'midi'|'both',
+     *     midi_source: string,
+     *     vendor_id: int|null,
+     *     product_id: int,
      *     midi_channel: int,
      *     debug_events: bool,
      *     dump_hid: bool,
@@ -152,6 +209,8 @@ readonly class ConsoleApplication
             $this->createOutput($options),
             $options['dump_hid'] || $options['debug_events'],
             $options['dump_hid_snapshots'],
+            $options['vendor_id'],
+            $options['product_id'],
         );
 
         $runner->run();
@@ -159,6 +218,8 @@ readonly class ConsoleApplication
 
     /**
      * @param array{
+     *     vendor_id: int|null,
+     *     product_id: int,
      *     dump_hid: bool,
      *     dump_hid_snapshots: bool
      * } $options
@@ -171,18 +232,20 @@ readonly class ConsoleApplication
             null,
             $options['dump_hid'],
             $options['dump_hid_snapshots'],
+            $options['vendor_id'],
+            $options['product_id'],
         );
 
         $runner->run();
     }
 
     /**
-     * @param array{midi_channel: int, test_note: string, debug_events: bool} $options
+     * @param array{midi_source: string, midi_channel: int, test_note: string, debug_events: bool} $options
      */
     private function runMidiTest(array $options): never
     {
         $output = new CoreMidiOutput(
-            self::MIDI_SOURCE,
+            $options['midi_source'],
             $options['midi_channel'],
             $options['debug_events'],
         );
@@ -217,15 +280,19 @@ readonly class ConsoleApplication
     }
 
     /**
-     * @param array{midi_channel: int, debug_events: bool} $options
+     * @param array{output: 'json'|'midi'|'both', midi_source: string, midi_channel: int, debug_events: bool} $options
      */
     private function createOutput(array $options): ControllerEventOutput
     {
-        return new CoreMidiOutput(
-            self::MIDI_SOURCE,
-            $options['midi_channel'],
-            $options['debug_events'],
-        );
+        return match ($options['output']) {
+            'json' => new JsonEventOutput(),
+            'midi' => new CoreMidiOutput($options['midi_source'], $options['midi_channel'], $options['debug_events']),
+            // JSONはJsonEventOutputが担当し、CoreMIDI側での二重出力を避ける。
+            'both' => new CompositeEventOutput([
+                new JsonEventOutput(),
+                new CoreMidiOutput($options['midi_source'], $options['midi_channel']),
+            ]),
+        };
     }
 
     /**
@@ -259,6 +326,18 @@ readonly class ConsoleApplication
             throw new InvalidArgumentException("Missing value for {$option}");
         }
 
+        return $value;
+    }
+
+    /**
+     * @return 'json'|'midi'|'both'
+     */
+    private function outputMode(string $value): string
+    {
+        $value = $this->nonEmptyOptionValue($value, '--output');
+        if (!in_array($value, ['json', 'midi', 'both'], true)) {
+            throw new InvalidArgumentException("Invalid output mode: {$value}. Expected json, midi, or both.");
+        }
         return $value;
     }
 
@@ -336,10 +415,8 @@ readonly class ConsoleApplication
     /**
      * @return array<string, mixed>
      */
-    private function loadConfig(): array
+    private function loadConfig(string $configPath): array
     {
-        $configPath = $this->projectRoot . self::KEYMAP_PATH;
-
         if (!is_file($configPath)) {
             throw new RuntimeException("Keymap config not found: {$configPath}");
         }
@@ -371,13 +448,18 @@ readonly class ConsoleApplication
     {
         return <<<USAGE
 Usage:
-  php run.php
+  php run.php [--output json|midi|both] [--config PATH]
   php run.php --test-note NOTE
   php run.php --dump-hid [--dump-hid-snapshots]
 
 Options:
+  -o, --output MODE   Output: json, midi, or both (default: midi)
+  -c, --config PATH   Keymap JSON file (default: project config/keymap.json)
+      --vendor-id ID  Match Vendor ID instead of manufacturer KONAMI
+      --product-id ID HID USB product ID (default: 0x0010)
+      --midi-source N CoreMIDI source name (default: KeyboardMania Virtual MIDI)
       --midi-channel N MIDI channel, 1-16 (default: 1)
-      --debug-events Print HID and mapped events while sending CoreMIDI
+      --debug-events Also print HID and mapped events in the selected output mode
       --test-note N   Send a repeating CoreMIDI test note without reading HID input
       --dump-hid      Print raw HID initial values and changes without MIDI output
       --dump-hid-snapshots
@@ -386,6 +468,8 @@ Options:
 
 Examples:
   php run.php
+  php run.php --output both
+  php run.php --output json --config config/keymap.json
   php run.php --debug-events
   php run.php --test-note C4
   php run.php --dump-hid
