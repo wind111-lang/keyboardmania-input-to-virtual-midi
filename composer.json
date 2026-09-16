@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "php run.php",
-    "analyse": "phpstan analyse"
+    "analyse": "phpstan analyse",
+    "test": "php tests/MatchingDictionaryTest.php"
   },
   "autoload": {
     "psr-4": {
