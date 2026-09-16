@@ -17,7 +17,7 @@ class HidInputToVirtualMidi
     private const int DUMP_SNAPSHOT_MILLISECONDS = 1_000;
     private const int CF_STRING_ENCODING_UTF8 = 0x08000100;
     private const int CF_NUMBER_INT_TYPE = 9;
-    private const int VENDOR_ID = 0x0507;
+    private const string MANUFACTURER = 'KONAMI';
     private const int PRODUCT_ID = 0x0010;
     private const int HID_PAGE_GENERIC_DESKTOP = 0x01;
     private const int HID_PAGE_BUTTON = 0x09;
@@ -81,8 +81,8 @@ class HidInputToVirtualMidi
             fwrite(
                 STDERR,
                 sprintf(
-                    "Reading HID input: KeyboardMania controller 0x%04x:0x%04x (%d buttons, %d axes)\n",
-                    self::VENDOR_ID,
+                    "Reading HID input: KeyboardMania controller %s / Product ID 0x%04x (%d buttons, %d axes)\n",
+                    self::MANUFACTURER,
                     self::PRODUCT_ID,
                     count($elements['buttons']),
                     count($elements['axes']),
@@ -172,7 +172,11 @@ CDEF;
 
         while (true) {
             $this->manager = $this->ffi->IOHIDManagerCreate(null, 0);
-            $matching = $this->createMatchingDictionary();
+            // 製造元名とProduct IDで対象デバイスを絞り込む。
+            $matching = $this->createMatchingDictionary([
+                'Manufacturer' => self::MANUFACTURER,
+                'ProductID' => self::PRODUCT_ID,
+            ]);
             $this->ffi->IOHIDManagerSetDeviceMatching($this->manager, $matching);
 
             $openResult = $this->ffi->IOHIDManagerOpen($this->manager, 0);
@@ -194,8 +198,8 @@ CDEF;
                 fwrite(
                     STDERR,
                     sprintf(
-                        "Waiting for KeyboardMania controller: 0x%04x:0x%04x\n",
-                        self::VENDOR_ID,
+                        "Waiting for KeyboardMania controller: %s / Product ID 0x%04x\n",
+                        self::MANUFACTURER,
                         self::PRODUCT_ID,
                     ),
                 );
@@ -206,47 +210,31 @@ CDEF;
         }
     }
 
-    private function createMatchingDictionary(): mixed
+    /**
+     * @param array<string, string|int> $criteria
+     */
+    private function createMatchingDictionary(array $criteria): mixed
     {
         $dictionary = $this->ffi->CFDictionaryCreateMutable(null, 0, null, null);
-        $vendorKey = $this->ffi->CFStringCreateWithCString(
-            null,
-            'VendorID',
-            self::CF_STRING_ENCODING_UTF8,
-        );
-        $productKey = $this->ffi->CFStringCreateWithCString(
-            null,
-            'ProductID',
-            self::CF_STRING_ENCODING_UTF8,
-        );
-        $vendorBuffer = $this->ffi->new('int[1]');
-        $vendorBuffer[0] = self::VENDOR_ID;
-        $productBuffer = $this->ffi->new('int[1]');
-        $productBuffer[0] = self::PRODUCT_ID;
-        $vendorValue = $this->ffi->CFNumberCreate(
-            null,
-            self::CF_NUMBER_INT_TYPE,
-            $vendorBuffer,
-        );
-        $productValue = $this->ffi->CFNumberCreate(
-            null,
-            self::CF_NUMBER_INT_TYPE,
-            $productBuffer,
-        );
-
-        $this->ffi->CFDictionarySetValue($dictionary, $vendorKey, $vendorValue);
-        $this->ffi->CFDictionarySetValue($dictionary, $productKey, $productValue);
-
         // Keep CF objects alive because the dictionary uses null callbacks.
-        $this->retainedCoreFoundationValues = [
-            $dictionary,
-            $vendorKey,
-            $productKey,
-            $vendorValue,
-            $productValue,
-            $vendorBuffer,
-            $productBuffer,
-        ];
+        $this->retainedCoreFoundationValues = [$dictionary];
+
+        foreach ($criteria as $name => $value) {
+            $key = $this->ffi->CFStringCreateWithCString(null, $name, self::CF_STRING_ENCODING_UTF8);
+
+            if (is_string($value)) {
+                $cfValue = $this->ffi->CFStringCreateWithCString(null, $value, self::CF_STRING_ENCODING_UTF8);
+            } else {
+                $buffer = $this->ffi->new('int[1]');
+                $buffer[0] = $value;
+                $cfValue = $this->ffi->CFNumberCreate(null, self::CF_NUMBER_INT_TYPE, $buffer);
+                $this->retainedCoreFoundationValues[] = $buffer;
+            }
+
+            $this->ffi->CFDictionarySetValue($dictionary, $key, $cfValue);
+            $this->retainedCoreFoundationValues[] = $key;
+            $this->retainedCoreFoundationValues[] = $cfValue;
+        }
 
         return $dictionary;
     }

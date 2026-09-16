@@ -5,6 +5,7 @@ GarageBand、MainStage、Logic Pro、REAPER など、CoreMIDI 入力を扱える
 ## Target Device
 
 このプロジェクトの利用には Keyboardmania 専用コントローラーが必要です。
+HIDの製造元名（`Manufacturer`）が `KONAMI`、`ProductID` が `0x0010` のデバイスを検索します。
 対象の Keyboardmania 専用コントローラーがまだ認識されていない場合、入力読み取りはデバイスが認識されるまで待機します。
 
 ## Setup
