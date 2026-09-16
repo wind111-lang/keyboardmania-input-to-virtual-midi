@@ -6,6 +6,7 @@ GarageBand、MainStage、Logic Pro、REAPER など、CoreMIDI 入力を扱える
 
 このプロジェクトの利用には Keyboardmania 専用コントローラーが必要です。
 HIDの製造元名（`Manufacturer`）が `KONAMI`、`ProductID` が `0x0010` のデバイスを検索します。
+`--product-id` で製品IDを変更できます。`--vendor-id` を明示すると、製造元名の代わりに指定した数値のVendor IDで検索します。
 対象の Keyboardmania 専用コントローラーがまだ認識されていない場合、入力読み取りはデバイスが認識されるまで待機します。
 
 ## Setup
@@ -23,21 +24,53 @@ composer install
 
 `src/Mapping` : HID の button/axis event を note/control event に変換します。鍵盤割り当ては `config/keymap.json` で調整します。
 
-`src/Output` : 変換後の event を CoreMIDI に出力します。debug 用の event 表示も CoreMIDI output 側に集約しています。
+`src/Output` : 変換後の event をJSON、CoreMIDI、または両方に出力します。
 
 `src/Contract` : output 実装が満たす interface を置いています。
 
 ## Usage
-Keyboardmania 専用コントローラーの HID device を読み取り、`KeyboardMania Virtual MIDI` という固定名の CoreMIDI source を作ります。
+Keyboardmania 専用コントローラーの HID device を読み取り、既定で `KeyboardMania Virtual MIDI` という名前の CoreMIDI source を作ります。
 
 ```sh
 php run.php
 ```
 
+JSON eventとMIDIを同時に出力する場合:
+```sh
+php run.php --output both
+```
+
+MIDIを作らず、JSON eventだけを確認する場合:
+```sh
+php run.php --output json
+```
+
+出力は `--output json|midi|both`（短縮形 `-o`）で選択でき、既定は `midi` です。
+`--output=both` の形式も使えます。
+
+別のキー割り当てファイルや仮想MIDIソース名を指定する場合:
+```sh
+php run.php --output both --config ./my-keymap.json --midi-source "My Keyboard"
+```
+
+`--config`（短縮形 `-c`）の既定はプロジェクト内の `config/keymap.json`、
+`--midi-source` の既定は `KeyboardMania Virtual MIDI` です。
+`--config=PATH`、`--midi-source=NAME` の形式も使えます。
+
+デバイスIDを明示する場合（10進数・16進数に対応）:
+```sh
+php run.php --vendor-id 0x0507 --product-id 0x0010
+```
+
+`--vendor-id=ID`、`--product-id=ID` の形式も使えます。
+
 CoreMIDI を出しながら HID raw event と変換後の event を確認したい場合:
 ```sh
 php run.php --debug-events
 ```
+
+`--debug-events` は各出力モードと併用できます。`both` でも変換後のJSON eventは重複出力しません。
+`--test-note` は出力モードに関係なくCoreMIDIへテスト音を送り、`--dump-hid` はMIDIを作らずHIDの生データだけを表示します。
 
 HID input を使わず、CoreMIDI source からテストノートだけを送る場合:
 ```sh

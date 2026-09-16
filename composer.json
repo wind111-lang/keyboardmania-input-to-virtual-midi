@@ -10,7 +10,10 @@
   "scripts": {
     "start": "php run.php",
     "analyse": "phpstan analyse",
-    "test": "php tests/MatchingDictionaryTest.php"
+    "test": [
+      "php tests/ConsoleApplicationTest.php",
+      "php tests/MatchingDictionaryTest.php"
+    ]
   },
   "autoload": {
     "psr-4": {

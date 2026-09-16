@@ -32,15 +32,17 @@ $readString = static function ($value) use ($cf): string {
     return FFI::string($buffer);
 };
 
-$input = new HidInputToVirtualMidi([], null);
-$method = new ReflectionMethod($input, 'createMatchingDictionary');
+$method = new ReflectionMethod(HidInputToVirtualMidi::class, 'createMatchingDictionary');
 
 // 実際のCore Foundation辞書を読み戻し、キー・値・ネイティブ型を検証する。
 foreach ([
-    ['Manufacturer' => 'KONAMI', 'ProductID' => 0x0010],
-    ['Manufacturer' => '別の製造元', 'ProductID' => 0x0020],
-] as $expected) {
-    $dictionary = $method->invoke($input, $expected);
+    [null, 0x0010, ['Manufacturer' => 'KONAMI', 'ProductID' => 0x0010]],
+    [null, 0x0020, ['Manufacturer' => 'KONAMI', 'ProductID' => 0x0020]],
+    [0x0507, 0x0010, ['VendorID' => 0x0507, 'ProductID' => 0x0010]],
+    [0, 0, ['VendorID' => 0, 'ProductID' => 0]],
+] as [$vendorId, $productId, $expected]) {
+    $input = new HidInputToVirtualMidi([], null, vendorId: $vendorId, productId: $productId);
+    $dictionary = $method->invoke($input);
     if ($cf->CFDictionaryGetCount($dictionary) !== 2) {
         throw new RuntimeException('Expected exactly two matching criteria.');
     }
@@ -53,13 +55,13 @@ foreach ([
         $name = $readString($keys[$i]);
         if ($name === 'Manufacturer') {
             $actual[$name] = $readString($values[$i]);
-        } elseif ($name === 'ProductID') {
+        } elseif ($name === 'ProductID' || $name === 'VendorID') {
             if ($cf->CFGetTypeID($values[$i]) !== $cf->CFNumberGetTypeID()) {
-                throw new RuntimeException('ProductID must be a CFNumber.');
+                throw new RuntimeException($name . ' must be a CFNumber.');
             }
             $number = $cf->new('int[1]');
             if (!$cf->CFNumberGetValue($values[$i], 9, $number)) {
-                throw new RuntimeException('Failed to read ProductID.');
+                throw new RuntimeException('Failed to read ' . $name);
             }
             $actual[$name] = $number[0];
         } else {
@@ -73,4 +75,4 @@ foreach ([
     }
 }
 
-fwrite(STDOUT, "PASS: Manufacturer (CFString) and ProductID (CFNumber), including UTF-8.\n");
+fwrite(STDOUT, "PASS: Manufacturer and ProductID matching, including explicit vendor/product ID overrides.\n");
